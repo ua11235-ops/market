@@ -1185,6 +1185,18 @@
         html += `<span>收</span><b>${formatNumber(point.c, digits)}</b>`;
         html += "</div>";
       }
+
+      // Volume for the hovered tick / bar.
+      const volume = Number(point.v);
+      if (Number.isFinite(volume) && volume > 0) {
+        const exact = new Intl.NumberFormat("en-US").format(Math.round(volume));
+        html +=
+          '<div class="tooltip-volume">' +
+          "<span>成交量</span>" +
+          `<b>${formatVolume(volume)}</b>` +
+          `<span class="exact">${exact}</span>` +
+          "</div>";
+      }
       const sign = change > 0 ? "+" : "";
       html += `<div class="tooltip-change is-${direction}">${sign}${formatNumber(change, digits)} · ${sign}${formatNumber(changePct, 2)}%</div>`;
 
