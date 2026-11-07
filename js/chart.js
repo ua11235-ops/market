@@ -535,10 +535,10 @@
       const period = this.period;
       const height = this.height;
       const width = this.width;
-      const left = 9;
-      const right = 64;
-      const top = 16;
-      const bottom = 24;
+      const left = 10;
+      const right = 78;
+      const top = 18;
+      const bottom = 28;
 
       // Only the visible slice is drawn; indices below stay absolute so the
       // overlay series and tooltips keep lining up with the full data set.
@@ -716,7 +716,7 @@
       ctx.setLineDash([]);
 
       ctx.fillStyle = COLORS.axisDim;
-      ctx.font = '8px "Bahnschrift", "Segoe UI", sans-serif';
+      ctx.font = '10.5px "Bahnschrift", "Segoe UI", sans-serif';
       ctx.textAlign = "left";
       ctx.textBaseline = "middle";
       const digits = getAxisDigits(
@@ -740,8 +740,8 @@
           ctx.lineTo(plot.left + plot.width, Math.round(referenceY) + 0.5);
           ctx.stroke();
           ctx.setLineDash([]);
-          ctx.fillStyle = "rgba(233, 186, 104, 0.6)";
-          ctx.font = '7.5px "Microsoft YaHei UI", sans-serif';
+          ctx.fillStyle = "rgba(233, 186, 104, 0.72)";
+          ctx.font = '10px "Microsoft YaHei UI", sans-serif';
           ctx.textAlign = "left";
           ctx.fillText(
             `昨收 ${formatNumber(this.data.prev_close, 2)}`,
@@ -942,7 +942,7 @@
 
       // Label the volume area with the scale reference.
       ctx.fillStyle = COLORS.axisDim;
-      ctx.font = '7.5px "Bahnschrift", "Segoe UI", sans-serif';
+      ctx.font = '10px "Bahnschrift", "Segoe UI", sans-serif';
       ctx.textAlign = "left";
       ctx.textBaseline = "top";
       ctx.fillText(formatVolume(scale), plot.left + plot.width + 9, top + 2);
@@ -962,7 +962,7 @@
       const unique = [...new Set(indices)];
       ctx.save();
       ctx.fillStyle = COLORS.axisDim;
-      ctx.font = '8px "Bahnschrift", "Segoe UI", sans-serif';
+      ctx.font = '10px "Bahnschrift", "Segoe UI", sans-serif';
       ctx.textBaseline = "top";
       unique.forEach((index, position) => {
         const x = xFor(index);
@@ -972,7 +972,7 @@
         ctx.textAlign = align;
         const label = formatAxisTime(points[index].t, period);
         const drawX = align === "left" ? Math.max(plot.left, x - 2) : align === "right" ? x + 2 : x;
-        ctx.fillText(label, drawX, height - 17);
+        ctx.fillText(label, drawX, height - 19);
       });
       ctx.restore();
     }
@@ -1004,21 +1004,21 @@
 
       // A small price tag attached to the right axis.
       const label = formatNumber(last.c, 2);
-      ctx.font = '8.5px "Bahnschrift", "Segoe UI", sans-serif';
+      ctx.font = '11px "Bahnschrift", "Segoe UI", sans-serif';
       const textWidth = ctx.measureText(label).width;
-      const tagWidth = textWidth + 10;
+      const tagWidth = textWidth + 12;
       const tagX = plot.left + plot.width + 2;
-      const tagY = clamp(y - 8, plot.top, plot.priceBottom - 16);
+      const tagY = clamp(y - 9, plot.top, plot.priceBottom - 18);
       ctx.fillStyle = hexToRgba(color, 0.16);
       ctx.strokeStyle = hexToRgba(color, 0.38);
       ctx.lineWidth = 1;
-      roundRect(ctx, tagX, tagY, tagWidth, 15, 3);
+      roundRect(ctx, tagX, tagY, tagWidth, 17, 3);
       ctx.fill();
       ctx.stroke();
       ctx.fillStyle = color;
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
-      ctx.fillText(label, tagX + tagWidth / 2, tagY + 7.8);
+      ctx.fillText(label, tagX + tagWidth / 2, tagY + 8.8);
       ctx.restore();
     }
 
@@ -1122,23 +1122,23 @@
       ctx.shadowBlur = 0;
 
       const label = formatNumber(last.c, 2);
-      ctx.font = '8.5px "Bahnschrift", "Segoe UI", sans-serif';
-      const tagWidth = ctx.measureText(label).width + 10;
+      ctx.font = '11px "Bahnschrift", "Segoe UI", sans-serif';
+      const tagWidth = ctx.measureText(label).width + 12;
       const tagX = plot.left + plot.width + 2;
-      let tagY = clamp(y + 9, plot.top, plot.priceBottom - 16);
-      if (Math.abs(y - (this.lastLondonY || -99)) < 16) {
-        tagY = clamp(y - 23, plot.top, plot.priceBottom - 16);
+      let tagY = clamp(y + 10, plot.top, plot.priceBottom - 18);
+      if (Math.abs(y - (this.lastLondonY || -99)) < 19) {
+        tagY = clamp(y - 26, plot.top, plot.priceBottom - 18);
       }
       ctx.fillStyle = hexToRgba(color, 0.16);
       ctx.strokeStyle = hexToRgba(color, 0.4);
       ctx.lineWidth = 1;
-      roundRect(ctx, tagX, tagY, tagWidth, 15, 3);
+      roundRect(ctx, tagX, tagY, tagWidth, 17, 3);
       ctx.fill();
       ctx.stroke();
       ctx.fillStyle = color;
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
-      ctx.fillText(label, tagX + tagWidth / 2, tagY + 7.8);
+      ctx.fillText(label, tagX + tagWidth / 2, tagY + 8.8);
       ctx.restore();
     }
 
@@ -1239,12 +1239,15 @@
       const tooltipWidth = this.tooltip.offsetWidth;
       const tooltipHeight = this.tooltip.offsetHeight;
       const pointX = xFor(index);
+      // Keep clear of the right-hand price gutter so the axis stays readable.
+      const plotBox = this.geometry ? this.geometry.plot : null;
+      const rightEdge = plotBox ? plotBox.left + plotBox.width : this.width - 8;
       let left = pointX + 14;
       let top = this.pointer.y - tooltipHeight / 2;
-      if (left + tooltipWidth > this.width - 8) {
+      if (left + tooltipWidth > rightEdge - 4) {
         left = pointX - tooltipWidth - 14;
       }
-      left = clamp(left, 5, this.width - tooltipWidth - 5);
+      left = clamp(left, 5, Math.max(5, rightEdge - tooltipWidth - 4));
       top = clamp(top, 4, this.height - tooltipHeight - 4);
       this.tooltip.style.left = `${left}px`;
       this.tooltip.style.top = `${top}px`;
