@@ -1,0 +1,38 @@
+# OS / editor
+Thumbs.db
+desktop.ini
+.DS_Store
+.vscode/
+.idea/
+
+# Python (desktop archive + local tooling)
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.spec
+build/
+dist/
+
+# Local caches and scratch dirs
+.corsprobe/
+.pwprobe/
+.pwweb/
+.pwcheck/
+.piptmp*/
+.pyitmp/
+.pyi-cache/
+.pip-cache/
+.cache*/
+.offline-cache/
+.runcheck*/
+.finaltmp*/
+.finaldata*/
+.finalcache*/
+.exetmp*/
+.pwtest*/
+.sgecache/
+.tmp/
+
+# Verification screenshots
+shot-*.png
