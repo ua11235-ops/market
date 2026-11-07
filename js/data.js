@@ -135,9 +135,39 @@
   // ------------------------------------------------------------------ quotes
 
   const QUOTE_FIELDS = "f2,f3,f4,f12,f14,f15,f16,f17,f18";
-  /* One request for every symbol: Eastmoney throttles bursts, so fewer, larger
-   * requests are far more reliable than many small ones. */
+  /* Eastmoney throttles bursts, so quotes travel in as few requests as
+   * possible.  Shanghai gold is fetched separately because the batch endpoint
+   * omits its previous close (f18), which made the change and premium read 0. */
   const QUOTE_BATCH = 30;
+
+  /* Single-instrument endpoint: it always carries the previous close. */
+  function fetchStockQuote(secid) {
+    const url =
+      `${QUOTE_HOST}/stock/get?fltt=2&invt=2&secid=${secid}` +
+      "&fields=f43,f44,f45,f46,f57,f58,f60,f169,f170";
+    return jsonp(url).then((payload) => {
+      const data = payload && payload.data;
+      if (!data || !Number.isFinite(Number(data.f43))) return null;
+      const price = Number(data.f43);
+      const previous = Number(data.f60);
+      const change = Number.isFinite(previous) ? price - previous : null;
+      return {
+        code: String(data.f57 || ""),
+        name: String(data.f58 || ""),
+        price,
+        previous: Number.isFinite(previous) ? previous : null,
+        change,
+        pct: Number.isFinite(Number(data.f170))
+          ? Number(data.f170)
+          : change !== null && previous
+            ? (change / previous) * 100
+            : null,
+        high: Number(data.f44),
+        low: Number(data.f45),
+        open: Number(data.f46),
+      };
+    });
+  }
 
   function fetchQuotes(secids) {
     const batches = [];
@@ -373,9 +403,16 @@
   function buildDashboard() {
     const markets = allMarkets();
     const secids = markets.map((market) => market.secid);
+    // Shanghai gold prefers the single-instrument endpoint because it always
+    // carries the previous close; the batch quote is the fallback.
+    const shanghaiQuote = cached("sge-quote", 15000, () =>
+      fetchStockQuote(SHANGHAI_GOLD_SECID).catch(() => null)
+    );
     return fetchUsdCny().then((fx) =>
-      fetchQuotes(secids.concat([GOLD_SECID, SHANGHAI_GOLD_SECID, "1.000688"])).then(
-        (quotes) => {
+      Promise.all([
+        fetchQuotes(secids.concat([GOLD_SECID, SHANGHAI_GOLD_SECID, "1.000688"])),
+        shanghaiQuote,
+      ]).then(([quotes, shanghaiStock]) => {
           const regions = REGIONS.map((region) => ({
             id: region.id,
             name: region.name,
@@ -386,7 +423,6 @@
           }));
 
           const goldRow = quotes.get("GC00Y");
-          const shanghaiRow = quotes.get("AU9999");
           const starRow = quotes.get("000688");
 
           let gold = null;
@@ -412,31 +448,48 @@
           }
 
           let shanghaiGold = null;
-          if (shanghaiRow) {
-            const price = scaled(shanghaiRow.f2);
-            const previous = scaled(shanghaiRow.f18);
-            const change = previous === null ? null : price - previous;
+          const batchRow = quotes.get("AU9999");
+          if (shanghaiStock && Number.isFinite(shanghaiStock.price)) {
             shanghaiGold = {
-              price: round(price, 2),
-              change: round(change, 2),
-              pct: scaled(shanghaiRow.f3),
-              previous: previous === null ? null : round(previous, 2),
-              open: round(scaled(shanghaiRow.f17), 2),
-              high: round(scaled(shanghaiRow.f15), 2),
-              low: round(scaled(shanghaiRow.f16), 2),
+              price: round(shanghaiStock.price, 2),
+              change:
+                shanghaiStock.change === null ? null : round(shanghaiStock.change, 2),
+              pct: round(shanghaiStock.pct, 2),
+              previous:
+                shanghaiStock.previous === null ? null : round(shanghaiStock.previous, 2),
+              open: round(shanghaiStock.open, 2),
+              high: round(shanghaiStock.high, 2),
+              low: round(shanghaiStock.low, 2),
               unit: "CNY/g",
               unit_label: "元/克",
               symbol: "Au99.99",
               name: "上海金 Au99.99",
               updated: "",
             };
-            if (gold && shanghaiGold.price) {
-              const premium = gold.price - shanghaiGold.price;
-              shanghaiGold.premium = round(premium, 2);
-              shanghaiGold.premium_pct = round((premium / shanghaiGold.price) * 100, 2);
-            }
+          } else if (batchRow && Number.isFinite(scaled(batchRow.f2))) {
+            // Fallback when the single-instrument endpoint is unavailable.
+            const price = scaled(batchRow.f2);
+            const previous = scaled(batchRow.f18);
+            shanghaiGold = {
+              price: round(price, 2),
+              change: previous === null ? null : round(price - previous, 2),
+              pct: scaled(batchRow.f3),
+              previous: previous === null ? null : round(previous, 2),
+              open: round(scaled(batchRow.f17), 2),
+              high: round(scaled(batchRow.f15), 2),
+              low: round(scaled(batchRow.f16), 2),
+              unit: "CNY/g",
+              unit_label: "元/克",
+              symbol: "Au99.99",
+              name: "上海金 Au99.99",
+              updated: "",
+            };
           }
-
+          if (shanghaiGold && gold && shanghaiGold.price) {
+            const premium = gold.price - shanghaiGold.price;
+            shanghaiGold.premium = round(premium, 2);
+            shanghaiGold.premium_pct = round((premium / shanghaiGold.price) * 100, 2);
+          }
           let star50 = null;
           if (starRow) {
             star50 = {
