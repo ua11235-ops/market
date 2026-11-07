@@ -440,8 +440,13 @@
     const button = $("refresh-button");
     if (button && force) button.classList.add("is-spinning");
     try {
-      // A forced refresh must bypass the short-lived browser cache.
-      if (force && window.AurumData.invalidate) window.AurumData.invalidate("dashboard");
+      // A forced refresh must bypass the short-lived browser cache, including
+      // the separately cached Shanghai gold quote.
+      if (force && window.AurumData.invalidate) {
+        window.AurumData.invalidate("dashboard");
+        window.AurumData.invalidate("sge-quote");
+        window.AurumData.invalidate("chart:");
+      }
       const payload = await withTimeout(window.AurumData.getDashboard(), controller.signal);
       if (controller.signal.aborted) return;
       updateDashboard(payload);
@@ -615,11 +620,18 @@
       chartState.dataPeriod = period;
       chartState.lastLoadedAt = Date.now();
       chartState.stale = Boolean(payload.stale);
-      chart.setData(payload);
-      if (period === "intraday" && state.dashboard && state.dashboard.assets) {
+      // Auto-refreshes of the same period keep the user's zoom window.
+      chart.setData(payload, { keepView: Boolean(settings.keepView) });
+      if (state.dashboard && state.dashboard.assets) {
         const asset = state.dashboard.assets[symbol];
         if (asset && Number.isFinite(Number(asset.price))) {
           chart.syncLatestPrice(Number(asset.price));
+        }
+        if (symbol === "gold") {
+          const shanghai = state.dashboard.assets.shanghai_gold;
+          if (shanghai && Number.isFinite(Number(shanghai.price))) {
+            chart.syncShanghaiPrice(Number(shanghai.price));
+          }
         }
       }
       updateChartMeta(symbol, payload);
@@ -732,7 +744,8 @@
         if (period === "intraday") {
           const last = state.charts[symbol].lastLoadedAt || 0;
           if (Date.now() - last > 55000) {
-            loadChart(symbol, period, { silent: true });
+            // keepView preserves whatever zoom range the visitor selected.
+            loadChart(symbol, period, { silent: true, keepView: true });
           }
         }
       });
@@ -743,7 +756,7 @@
         loadDashboard(false, true);
         ["gold", "star50"].forEach((symbol) => {
           if (state.charts[symbol].period === "intraday") {
-            loadChart(symbol, "intraday", { silent: true });
+            loadChart(symbol, "intraday", { silent: true, keepView: true });
           }
         });
       }
