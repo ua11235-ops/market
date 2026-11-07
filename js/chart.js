@@ -90,6 +90,15 @@
     }).format(value);
   }
 
+  /* Compact volume label: 12,345 -> 1.23万, 123,456,789 -> 1.23亿. */
+  function formatVolume(value) {
+    const number = Number(value);
+    if (!Number.isFinite(number) || number <= 0) return "0";
+    if (number >= 1e8) return `${(number / 1e8).toFixed(2)}亿`;
+    if (number >= 1e4) return `${(number / 1e4).toFixed(2)}万`;
+    return String(Math.round(number));
+  }
+
   function niceStep(rawStep) {
     if (!Number.isFinite(rawStep) || rawStep <= 0) return 1;
     const exponent = Math.floor(Math.log10(rawStep));
@@ -539,11 +548,12 @@
       const visibleEnd = Math.min(count - 1, Math.ceil(this.view.end));
       if (visibleEnd <= visibleStart) return;
 
-      const hasVolume =
-        period !== "intraday" &&
-        points.slice(visibleStart, visibleEnd + 1).some((point) => Number(point.v) > 0);
+      // Volume is shown for both candles and the intraday line.
+      const hasVolume = points
+        .slice(visibleStart, visibleEnd + 1)
+        .some((point) => Number(point.v) > 0);
       const usableHeight = height - top - bottom;
-      const volumeHeight = hasVolume ? Math.max(22, usableHeight * 0.17) : 0;
+      const volumeHeight = hasVolume ? Math.max(24, usableHeight * 0.2) : 0;
       const gap = hasVolume ? 12 : 0;
       const priceHeight = usableHeight - volumeHeight - gap;
       const plot = {
@@ -891,23 +901,53 @@
       const to = visibleEnd === undefined ? points.length - 1 : visibleEnd;
       const visibleCount = Math.max(1, to - from + 1);
       const slot = plot.width / visibleCount;
-      const barWidth = clamp(slot * 0.55, 1, 7);
-      let maxVolume = 1;
+      const barWidth = clamp(slot * 0.62, 1, 7);
+
+      // A single outlier spike would flatten every other bar, so the scale is
+      // based on the 95th percentile and the rare peaks simply clip.
+      const volumes = [];
       for (let index = from; index <= to; index += 1) {
         const volume = Number(points[index].v) || 0;
-        if (volume > maxVolume) maxVolume = volume;
+        if (volume > 0) volumes.push(volume);
       }
+      if (!volumes.length) return;
+      volumes.sort((a, b) => a - b);
+      const peak = volumes[volumes.length - 1];
+      const percentile = volumes[Math.floor(volumes.length * 0.95)] || peak;
+      const scale = Math.max(percentile, peak * 0.35);
+
+      const top = plot.priceBottom + 12;
       const baseY = plot.priceBottom + height;
+
       ctx.save();
+
+      // Baseline separating price from volume.
+      ctx.strokeStyle = "rgba(255, 255, 255, 0.06)";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(plot.left, Math.round(top) + 0.5);
+      ctx.lineTo(plot.left + plot.width, Math.round(top) + 0.5);
+      ctx.stroke();
+
       for (let index = from; index <= to; index += 1) {
         const point = points[index];
         const volume = Number(point.v) || 0;
         if (!volume) continue;
         const isUp = point.c >= point.o;
-        const barHeight = Math.max(1, (volume / maxVolume) * height * 0.9);
-        ctx.fillStyle = isUp ? "rgba(255, 92, 108, 0.24)" : "rgba(15, 196, 140, 0.24)";
+        const ratio = Math.min(1, volume / scale);
+        const barHeight = Math.max(1, ratio * height * 0.92);
+        ctx.fillStyle = isUp ? "rgba(255, 92, 108, 0.55)" : "rgba(15, 196, 140, 0.55)";
         ctx.fillRect(xFor(index) - barWidth / 2, baseY - barHeight, barWidth, barHeight);
       }
+
+      // Label the volume area with the scale reference.
+      ctx.fillStyle = COLORS.axisDim;
+      ctx.font = '7.5px "Bahnschrift", "Segoe UI", sans-serif';
+      ctx.textAlign = "left";
+      ctx.textBaseline = "top";
+      ctx.fillText(formatVolume(scale), plot.left + plot.width + 9, top + 2);
+      ctx.fillStyle = "rgba(127, 139, 155, 0.75)";
+      ctx.fillText("量", plot.left + 2, top + 2);
       ctx.restore();
     }
 
