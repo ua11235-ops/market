@@ -346,13 +346,21 @@
         });
       });
       if (!points.length) throw new Error("暂无分时数据");
-      const lastDay = new Date(points[points.length - 1].t + 8 * 3600 * 1000)
-        .toISOString()
-        .slice(0, 10);
-      const session = points.filter(
-        (point) =>
-          new Date(point.t + 8 * 3600 * 1000).toISOString().slice(0, 10) === lastDay
-      );
+      /* A session runs overnight: the night leg starts around 20:00 and rolls
+       * into the next calendar day.  Slice the most recent *complete* session
+       * instead of the last calendar date, so the night leg and the following
+       * day session stay together. */
+      const last = points[points.length - 1].t;
+      const lastLocal = new Date(last + 8 * 3600 * 1000);
+      const sessionStart = new Date(lastLocal.getTime());
+      // The session opens around 18:00-20:00 and runs through the next
+      // afternoon, so anything before 18:00 belongs to yesterday's start.
+      if (lastLocal.getUTCHours() < 18) {
+        sessionStart.setUTCDate(sessionStart.getUTCDate() - 1);
+      }
+      sessionStart.setUTCHours(18, 0, 0, 0);
+      const startMs = sessionStart.getTime() - 8 * 3600 * 1000;
+      const session = points.filter((point) => point.t >= startMs);
       return {
         prev_close: scaled(data.preClose),
         points: session.length > 20 ? session : points,
