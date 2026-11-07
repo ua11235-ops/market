@@ -228,17 +228,20 @@
         this.pointer.y = event.clientY - rect.top;
 
         if (this.drag) {
-          // Pan: move the window opposite to the pointer.
+          // Pan the window opposite to the pointer.  Offsets are measured from
+          // the drag origin and always applied to the view captured on
+          // pointerdown, so the motion never accumulates against itself.
           const plot = this.geometry.plot;
-          const perPixel = (this.view.end - this.view.start) / Math.max(1, plot.width);
-          const delta = (this.pointer.x - this.drag.lastX) * perPixel;
+          const span = this.drag.startView.end - this.drag.startView.start;
+          const perPixel = span / Math.max(1, plot.width);
+          const moved = this.pointer.x - this.drag.originX;
+          const delta = moved * perPixel;
           this.view.start = this.drag.startView.start - delta;
           this.view.end = this.drag.startView.end - delta;
           this.clampView();
           this.canvas.classList.toggle("is-zoomed", this.isZoomed());
           this.syncZoomBadge();
-          this.drag.lastX = this.pointer.x;
-          this.drag.moved = true;
+          if (Math.abs(moved) > 3) this.drag.moved = true;
           this.hoverIndex = -1;
           this.tooltip.classList.remove("is-visible");
           this.scheduleDraw();
@@ -263,8 +266,9 @@
         if (!this.geometry || !this.data || this.data.points.length < 2) return;
         if (event.button !== 0) return;
         const rect = this.canvas.getBoundingClientRect();
+        const originX = event.clientX - rect.left;
         this.drag = {
-          lastX: event.clientX - rect.left,
+          originX,
           startView: { ...this.view },
           moved: false,
         };
@@ -344,15 +348,29 @@
       this.scheduleDraw();
     }
 
-    setData(payload) {
+    setData(payload, options) {
+      const keepView = Boolean(options && options.keepView) && this.isZoomed();
+      const previousView = { ...this.view };
+      const previousPeriod = this.period;
+
       this.data = payload;
       this.period = payload.period || "intraday";
       this.hoverIndex = -1;
       this.tooltip.classList.remove("is-visible");
-      // A fresh series starts fully visible.
+
       const count = this.pointCount();
-      this.view = { start: 0, end: Math.max(1, count - 1) };
-      this.canvas.classList.remove("is-zoomed");
+      if (keepView && previousPeriod === this.period && count > 1) {
+        // Refreshing the same series keeps whatever range the user zoomed to.
+        this.view = previousView;
+        this.clampView();
+        this.canvas.classList.toggle("is-zoomed", this.isZoomed());
+        this.syncZoomBadge();
+      } else {
+        // A new symbol or period starts fully visible.
+        this.view = { start: 0, end: Math.max(1, count - 1) };
+        this.canvas.classList.remove("is-zoomed");
+        this.syncZoomBadge();
+      }
       this.scheduleDraw();
     }
 
@@ -369,14 +387,32 @@
     }
 
     syncShanghaiPrice(price) {
-      if (!this.data || this.period !== "intraday" || !Number.isFinite(price)) return;
+      if (!this.data || !Number.isFinite(price)) return;
       const overlay = this.data.shanghai;
       if (!overlay || !Array.isArray(overlay.points) || !overlay.points.length) return;
-      const last = overlay.points[overlay.points.length - 1];
-      if (Math.abs(last.c - price) < 0.0001) return;
-      last.c = price;
-      last.h = Math.max(last.h, price);
-      last.l = Math.min(last.l, price);
+      const points = this.data.points || [];
+
+      if (this.period === "intraday") {
+        // Nudge the newest intraday tick to the live quote.
+        const last = overlay.points[overlay.points.length - 1];
+        if (Math.abs(last.c - price) < 0.0001) return;
+        last.c = price;
+        last.h = Math.max(last.h, price);
+        last.l = Math.min(last.l, price);
+        this.scheduleDraw();
+        return;
+      }
+
+      // On candles the live quote belongs to the newest bar, but only when that
+      // bar is the current one; older history must stay untouched.
+      if (!points.length) return;
+      const newest = points[points.length - 1].t;
+      const target = overlay.points[overlay.points.length - 1];
+      if (!target || target.t !== newest) return;
+      if (Math.abs(target.c - price) < 0.0001) return;
+      target.c = price;
+      target.h = Math.max(target.h, price);
+      target.l = Math.min(target.l, price);
       this.scheduleDraw();
     }
 
