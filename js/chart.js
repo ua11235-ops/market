@@ -135,9 +135,89 @@
       this.frame = 0;
       this.width = 0;
       this.height = 0;
+      /* Visible slice of the series, in fractional point indices.  The full
+       * series is [0, n-1]; zooming narrows this window and panning shifts it. */
+      this.view = { start: 0, end: 1 };
+      this.drag = null;
+      this.zoomBadge = document.getElementById(`${this.symbol}-zoom-badge`);
       this.resizeObserver = new ResizeObserver(() => this.scheduleDraw());
       this.resizeObserver.observe(this.wrap);
       this.bindPointer();
+    }
+
+    pointCount() {
+      return this.data && Array.isArray(this.data.points) ? this.data.points.length : 0;
+    }
+
+    /* Keep the window inside the series and never let it collapse to nothing. */
+    clampView() {
+      const count = this.pointCount();
+      if (count < 2) {
+        this.view = { start: 0, end: 1 };
+        return;
+      }
+      const max = count - 1;
+      let start = Math.max(0, Math.min(this.view.start, max));
+      let end = Math.min(max, Math.max(this.view.end, 0));
+
+      // Zooming out past the full range snaps back to the whole series.
+      if (start <= 0.5 && end >= max - 0.5) {
+        this.view = { start: 0, end: max };
+        return;
+      }
+
+      const minSpan = Math.min(8, max);
+      if (end - start < minSpan) {
+        const centre = (start + end) / 2;
+        start = centre - minSpan / 2;
+        end = centre + minSpan / 2;
+        if (start < 0) {
+          end -= start;
+          start = 0;
+        }
+        if (end > max) {
+          start -= end - max;
+          end = max;
+        }
+        start = Math.max(0, start);
+      }
+      this.view = { start, end };
+    }
+
+    isZoomed() {
+      const count = this.pointCount();
+      if (count < 2) return false;
+      return this.view.start > 0.5 || this.view.end < count - 1.5;
+    }
+
+    resetView() {
+      const count = this.pointCount();
+      this.view = { start: 0, end: Math.max(1, count - 1) };
+      this.hoverIndex = -1;
+      this.tooltip.classList.remove("is-visible");
+      this.canvas.classList.remove("is-zoomed");
+      this.syncZoomBadge();
+      this.scheduleDraw();
+    }
+
+    /* Small badge showing how many bars are currently in view. */
+    syncZoomBadge() {
+      if (!this.zoomBadge) return;
+      const count = this.pointCount();
+      if (count < 2 || !this.isZoomed()) {
+        this.zoomBadge.classList.remove("is-visible");
+        this.zoomBadge.textContent = "";
+        return;
+      }
+      const shown = Math.round(this.view.end - this.view.start) + 1;
+      this.zoomBadge.textContent = `${shown} / ${count} 根 · 双击复位`;
+      this.zoomBadge.classList.add("is-visible");
+    }
+
+    /* Convert a canvas x coordinate into a fractional point index. */
+    indexAt(x, plot) {
+      const ratio = clamp((x - plot.left) / plot.width, 0, 1);
+      return this.view.start + ratio * (this.view.end - this.view.start);
     }
 
     bindPointer() {
@@ -146,18 +226,115 @@
         const rect = this.canvas.getBoundingClientRect();
         this.pointer.x = event.clientX - rect.left;
         this.pointer.y = event.clientY - rect.top;
+
+        if (this.drag) {
+          // Pan: move the window opposite to the pointer.
+          const plot = this.geometry.plot;
+          const perPixel = (this.view.end - this.view.start) / Math.max(1, plot.width);
+          const delta = (this.pointer.x - this.drag.lastX) * perPixel;
+          this.view.start = this.drag.startView.start - delta;
+          this.view.end = this.drag.startView.end - delta;
+          this.clampView();
+          this.canvas.classList.toggle("is-zoomed", this.isZoomed());
+          this.syncZoomBadge();
+          this.drag.lastX = this.pointer.x;
+          this.drag.moved = true;
+          this.hoverIndex = -1;
+          this.tooltip.classList.remove("is-visible");
+          this.scheduleDraw();
+          return;
+        }
+
         const plot = this.geometry.plot;
         if (this.pointer.x < plot.left - 4 || this.pointer.x > plot.left + plot.width + 4) {
           this.clearHover();
           return;
         }
-        const ratio = clamp((this.pointer.x - plot.left) / plot.width, 0, 1);
         const count = this.data.points.length;
-        this.hoverIndex = clamp(Math.round(ratio * (count - 1)), 0, count - 1);
+        this.hoverIndex = clamp(
+          Math.round(this.indexAt(this.pointer.x, plot)),
+          0,
+          count - 1
+        );
         this.scheduleDraw();
       });
-      this.canvas.addEventListener("pointerleave", () => this.clearHover());
-      this.canvas.addEventListener("pointercancel", () => this.clearHover());
+
+      this.canvas.addEventListener("pointerdown", (event) => {
+        if (!this.geometry || !this.data || this.data.points.length < 2) return;
+        if (event.button !== 0) return;
+        const rect = this.canvas.getBoundingClientRect();
+        this.drag = {
+          lastX: event.clientX - rect.left,
+          startView: { ...this.view },
+          moved: false,
+        };
+        this.canvas.classList.add("is-dragging");
+        this.canvas.setPointerCapture(event.pointerId);
+        event.preventDefault();
+      });
+
+      const endDrag = (event) => {
+        if (!this.drag) return;
+        const wasClick = !this.drag.moved;
+        this.drag = null;
+        this.canvas.classList.remove("is-dragging");
+        try {
+          this.canvas.releasePointerCapture(event.pointerId);
+        } catch (error) {
+          /* pointer may already be released */
+        }
+        if (wasClick) this.clearHover();
+      };
+      this.canvas.addEventListener("pointerup", endDrag);
+      this.canvas.addEventListener("pointercancel", endDrag);
+
+      // Wheel zoom, anchored at the cursor so the point under it stays put.
+      this.canvas.addEventListener(
+        "wheel",
+        (event) => {
+          if (!this.geometry || !this.data || this.data.points.length < 2) return;
+          event.preventDefault();
+          const rect = this.canvas.getBoundingClientRect();
+          const x = event.clientX - rect.left;
+          const plot = this.geometry.plot;
+          const ratio = clamp((x - plot.left) / plot.width, 0, 1);
+          const anchor = this.view.start + ratio * (this.view.end - this.view.start);
+          // Zoom in slowly and out faster, so returning to the full range
+          // never needs dozens of scroll steps.
+          const perUnit = event.deltaY > 0 ? 0.0042 : 0.0016;
+          const factor = Math.exp(event.deltaY * perUnit);
+          let start = anchor - (anchor - this.view.start) * factor;
+          let end = anchor + (this.view.end - anchor) * factor;
+
+          // Zooming out beyond the full range restores the whole series.
+          const max = this.pointCount() - 1;
+          if (start <= 0 && end >= max) {
+            this.resetView();
+            return;
+          }
+
+          this.view = { start, end };
+          this.clampView();
+          this.canvas.classList.toggle("is-zoomed", this.isZoomed());
+          this.syncZoomBadge();
+          this.hoverIndex = -1;
+          this.tooltip.classList.remove("is-visible");
+          this.scheduleDraw();
+        },
+        { passive: false }
+      );
+
+      // Double click restores the full range.
+      this.canvas.addEventListener("dblclick", (event) => {
+        if (!this.data || this.data.points.length < 2) return;
+        event.preventDefault();
+        this.resetView();
+      });
+
+      this.canvas.addEventListener("pointerleave", () => {
+        if (this.drag) return;
+        this.clearHover();
+      });
     }
 
     clearHover() {
@@ -172,6 +349,10 @@
       this.period = payload.period || "intraday";
       this.hoverIndex = -1;
       this.tooltip.classList.remove("is-visible");
+      // A fresh series starts fully visible.
+      const count = this.pointCount();
+      this.view = { start: 0, end: Math.max(1, count - 1) };
+      this.canvas.classList.remove("is-zoomed");
       this.scheduleDraw();
     }
 
@@ -218,6 +399,25 @@
         end = end === null ? overlayEnd : Math.max(end, overlayEnd);
       }
       return { start, end };
+    }
+
+    /* Find the fractional index whose timestamp matches ``time``. */
+    indexAtTime(time) {
+      const points = this.data && this.data.points ? this.data.points : [];
+      if (!points.length) return 0;
+      if (time <= points[0].t) return 0;
+      const last = points.length - 1;
+      if (time >= points[last].t) return last;
+      let low = 0;
+      let high = last;
+      while (high - low > 1) {
+        const mid = (low + high) >> 1;
+        if (points[mid].t <= time) low = mid;
+        else high = mid;
+      }
+      const span = points[high].t - points[low].t;
+      if (!(span > 0)) return low;
+      return low + (time - points[low].t) / span;
     }
 
     /* Map an overlay point onto the primary x-axis using real timestamps. */
@@ -294,7 +494,18 @@
       const right = 64;
       const top = 16;
       const bottom = 24;
-      const hasVolume = period !== "intraday" && points.some((point) => Number(point.v) > 0);
+
+      // Only the visible slice is drawn; indices below stay absolute so the
+      // overlay series and tooltips keep lining up with the full data set.
+      const count = points.length;
+      this.clampView();
+      const visibleStart = Math.max(0, Math.floor(this.view.start));
+      const visibleEnd = Math.min(count - 1, Math.ceil(this.view.end));
+      if (visibleEnd <= visibleStart) return;
+
+      const hasVolume =
+        period !== "intraday" &&
+        points.slice(visibleStart, visibleEnd + 1).some((point) => Number(point.v) > 0);
       const usableHeight = height - top - bottom;
       const volumeHeight = hasVolume ? Math.max(22, usableHeight * 0.17) : 0;
       const gap = hasVolume ? 12 : 0;
@@ -312,15 +523,19 @@
       const highs = [];
       const lows = [];
       const overlay = this.overlayPoints();
-      for (const series of [points, overlay]) {
-        for (const point of series) {
-          if (Number.isFinite(point.h)) highs.push(point.h);
-          if (Number.isFinite(point.l)) lows.push(point.l);
-          for (const key of ["ma5", "ma10", "ma20"]) {
-            if (Number.isFinite(point[key])) highs.push(point[key]);
-          }
-          if (period === "intraday" && Number.isFinite(point.avg)) highs.push(point.avg);
+      for (const point of points.slice(visibleStart, visibleEnd + 1)) {
+        if (Number.isFinite(point.h)) highs.push(point.h);
+        if (Number.isFinite(point.l)) lows.push(point.l);
+        for (const key of ["ma5", "ma10", "ma20"]) {
+          if (Number.isFinite(point[key])) highs.push(point[key]);
         }
+        if (period === "intraday" && Number.isFinite(point.avg)) highs.push(point.avg);
+      }
+      // Overlay values inside the same window must also fit.
+      const visibleOverlay = this.visibleOverlay(overlay, points, visibleStart, visibleEnd);
+      for (const point of visibleOverlay) {
+        if (Number.isFinite(point.h)) highs.push(point.h);
+        if (Number.isFinite(point.l)) lows.push(point.l);
       }
       let maxValue = Math.max(...highs);
       let minValue = Math.min(...lows);
@@ -355,13 +570,10 @@
       const span = this.timeSpan();
       const useTimeAxis =
         overlay.length > 0 && this.period !== "intraday" && Number.isFinite(span.start) && span.end > span.start;
+      const viewSpan = Math.max(1e-9, this.view.end - this.view.start);
       const xFor = (index) => {
-        if (useTimeAxis) {
-          const ratio = (points[index].t - span.start) / (span.end - span.start);
-          return left + clamp(ratio, 0, 1) * plot.width;
-        }
-        const count = points.length;
-        return left + ((index + 0.5) / count) * plot.width;
+        const ratio = (index - this.view.start) / viewSpan;
+        return left + ratio * plot.width;
       };
       const yFor = (value) => {
         return top + ((yMax - value) / (yMax - yMin)) * plot.height;
@@ -378,37 +590,54 @@
         volumeTop: plot.priceBottom + gap,
         volumeHeight,
         points,
+        visibleStart,
+        visibleEnd,
       };
 
-      this.drawGrid(ctx, plot, tickValues, yMin, yMax, points, period, xFor, yFor, width);
-      this.drawVolume(ctx, points, xFor, plot, volumeHeight, hasVolume);
+      this.drawGrid(ctx, plot, tickValues, yMin, yMax, points, period, xFor, yFor, width, visibleStart, visibleEnd);
+      this.drawVolume(ctx, points, xFor, plot, volumeHeight, hasVolume, visibleStart, visibleEnd);
 
       if (period === "intraday" && overlay.length) {
         // Draw both intraday lines on their own normalised session width so
         // one screen compares their shapes even when the exchanges are open
         // on different dates (weekends, holidays).  The axis labels below
         // still show each session's real local time.
-        this.drawIntraday(ctx, points, xFor, yFor, plot);
+        this.drawIntraday(ctx, points, xFor, yFor, plot, visibleStart, visibleEnd);
         this.drawOverlayLine(ctx, overlay, xFor, yFor, plot, false, true);
       } else if (period === "intraday") {
-        this.drawIntraday(ctx, points, xFor, yFor, plot);
+        this.drawIntraday(ctx, points, xFor, yFor, plot, visibleStart, visibleEnd);
       } else {
-        this.drawCandles(ctx, points, xFor, yFor, plot);
-        this.drawMovingAverages(ctx, points, xFor, yFor);
+        this.drawCandles(ctx, points, xFor, yFor, plot, visibleStart, visibleEnd);
+        this.drawMovingAverages(ctx, points, xFor, yFor, visibleStart, visibleEnd);
         this.drawOverlayLine(ctx, overlay, xFor, yFor, plot, true);
       }
 
-      this.drawAxisDates(ctx, points, period, xFor, plot, width, height);
-      this.drawLastMarker(ctx, points, xFor, yFor, plot, period);
+      this.drawAxisDates(ctx, points, period, xFor, plot, width, height, visibleStart, visibleEnd);
+      this.drawLastMarker(ctx, points, xFor, yFor, plot, period, visibleStart, visibleEnd);
       this.drawOverlayMarker(ctx, overlay, xFor, yFor, plot);
 
-      if (this.hoverIndex >= 0) {
+      if (this.hoverIndex >= 0 && this.hoverIndex >= visibleStart && this.hoverIndex <= visibleEnd) {
         this.drawCrosshair(ctx, points, xFor, yFor, plot, height);
         this.updateTooltip(points, xFor, plot);
+      } else if (this.hoverIndex >= 0) {
+        this.hoverIndex = -1;
+        this.tooltip.classList.remove("is-visible");
       }
     }
 
-    drawGrid(ctx, plot, values, yMin, yMax, points, period, xFor, yFor, width) {
+    /* Overlay points that fall inside the visible window. */
+    visibleOverlay(overlay, points, visibleStart, visibleEnd) {
+      if (!overlay.length || !points.length) return [];
+      if (this.period === "intraday") {
+        // Intraday overlay is drawn normalised, so keep it whole.
+        return overlay;
+      }
+      const from = points[visibleStart] ? points[visibleStart].t : -Infinity;
+      const to = points[visibleEnd] ? points[visibleEnd].t : Infinity;
+      return overlay.filter((point) => point.t >= from && point.t <= to);
+    }
+
+    drawGrid(ctx, plot, values, yMin, yMax, points, period, xFor, yFor, width, visibleStart, visibleEnd) {
       ctx.save();
       ctx.lineWidth = 1;
       ctx.strokeStyle = COLORS.grid;
@@ -422,10 +651,12 @@
       ctx.stroke();
 
       const tickCount = width < 480 ? 4 : 5;
-      const indexStep = Math.max(1, Math.round((points.length - 1) / tickCount));
+      const first = visibleStart === undefined ? 0 : visibleStart;
+      const last = visibleEnd === undefined ? points.length - 1 : visibleEnd;
+      const indexStep = Math.max(1, Math.round((last - first) / tickCount));
       const indices = [];
-      for (let i = 0; i < points.length; i += indexStep) indices.push(i);
-      if (indices[indices.length - 1] !== points.length - 1) indices.push(points.length - 1);
+      for (let i = first; i <= last; i += indexStep) indices.push(i);
+      if (indices[indices.length - 1] !== last) indices.push(last);
 
       ctx.strokeStyle = "rgba(255,255,255,0.035)";
       ctx.setLineDash([2, 5]);
@@ -476,24 +707,28 @@
       ctx.restore();
     }
 
-    drawIntraday(ctx, points, xFor, yFor, plot) {
-      const last = points[points.length - 1];
+    drawIntraday(ctx, points, xFor, yFor, plot, visibleStart, visibleEnd) {
+      const from = visibleStart === undefined ? 0 : visibleStart;
+      const to = visibleEnd === undefined ? points.length - 1 : visibleEnd;
+      const slice = points.slice(from, to + 1);
+      if (!slice.length) return;
+      const last = slice[slice.length - 1];
       const reference = Number.isFinite(this.data.prev_close)
         ? this.data.prev_close
-        : points[0].c;
+        : slice[0].c;
       const trend = trendOf(last.c, reference);
       const color = trend === "up" ? COLORS.up : trend === "down" ? COLORS.down : COLORS.flat;
 
       ctx.save();
       ctx.beginPath();
-      points.forEach((point, index) => {
-        const x = xFor(index);
+      slice.forEach((point, offset) => {
+        const x = xFor(from + offset);
         const y = yFor(point.c);
-        if (index === 0) ctx.moveTo(x, y);
+        if (offset === 0) ctx.moveTo(x, y);
         else ctx.lineTo(x, y);
       });
-      ctx.lineTo(xFor(points.length - 1), plot.priceBottom);
-      ctx.lineTo(xFor(0), plot.priceBottom);
+      ctx.lineTo(xFor(to), plot.priceBottom);
+      ctx.lineTo(xFor(from), plot.priceBottom);
       ctx.closePath();
       const gradient = ctx.createLinearGradient(0, plot.top, 0, plot.priceBottom);
       gradient.addColorStop(0, hexToRgba(color, 0.22));
@@ -502,10 +737,10 @@
       ctx.fillStyle = gradient;
       ctx.fill();
 
-      if (points.some((point) => Number.isFinite(point.avg))) {
+      if (slice.some((point) => Number.isFinite(point.avg))) {
         ctx.beginPath();
         let started = false;
-        for (let index = 0; index < points.length; index += 1) {
+        for (let index = from; index <= to; index += 1) {
           const point = points[index];
           if (!Number.isFinite(point.avg)) continue;
           const x = xFor(index);
@@ -527,10 +762,10 @@
       }
 
       ctx.beginPath();
-      points.forEach((point, index) => {
-        const x = xFor(index);
+      slice.forEach((point, offset) => {
+        const x = xFor(from + offset);
         const y = yFor(point.c);
-        if (index === 0) ctx.moveTo(x, y);
+        if (offset === 0) ctx.moveTo(x, y);
         else ctx.lineTo(x, y);
       });
       ctx.strokeStyle = color;
@@ -544,12 +779,14 @@
       ctx.restore();
     }
 
-    drawCandles(ctx, points, xFor, yFor, plot) {
-      const count = points.length;
-      const slot = plot.width / Math.max(count, 1);
+    drawCandles(ctx, points, xFor, yFor, plot, visibleStart, visibleEnd) {
+      const from = visibleStart === undefined ? 0 : visibleStart;
+      const to = visibleEnd === undefined ? points.length - 1 : visibleEnd;
+      const visibleCount = Math.max(1, to - from + 1);
+      const slot = plot.width / visibleCount;
       const bodyWidth = clamp(slot * 0.6, 1, 9);
       ctx.save();
-      for (let index = 0; index < count; index += 1) {
+      for (let index = from; index <= to; index += 1) {
         const point = points[index];
         if (!Number.isFinite(point.o) || !Number.isFinite(point.c)) continue;
         const x = xFor(index);
@@ -578,7 +815,9 @@
       ctx.restore();
     }
 
-    drawMovingAverages(ctx, points, xFor, yFor) {
+    drawMovingAverages(ctx, points, xFor, yFor, visibleStart, visibleEnd) {
+      const from = visibleStart === undefined ? 0 : visibleStart;
+      const to = visibleEnd === undefined ? points.length - 1 : visibleEnd;
       const definitions = [
         { key: "ma5", color: COLORS.ma5 },
         { key: "ma10", color: COLORS.ma10 },
@@ -588,7 +827,7 @@
       for (const definition of definitions) {
         let started = false;
         ctx.beginPath();
-        for (let index = 0; index < points.length; index += 1) {
+        for (let index = from; index <= to; index += 1) {
           const value = points[index][definition.key];
           if (!Number.isFinite(value)) continue;
           const x = xFor(index);
@@ -610,18 +849,23 @@
       ctx.restore();
     }
 
-    drawVolume(ctx, points, xFor, plot, height, hasVolume) {
+    drawVolume(ctx, points, xFor, plot, height, hasVolume, visibleStart, visibleEnd) {
       if (!hasVolume) return;
-      const count = points.length;
-      const slot = plot.width / Math.max(count, 1);
+      const from = visibleStart === undefined ? 0 : visibleStart;
+      const to = visibleEnd === undefined ? points.length - 1 : visibleEnd;
+      const visibleCount = Math.max(1, to - from + 1);
+      const slot = plot.width / visibleCount;
       const barWidth = clamp(slot * 0.55, 1, 7);
-      const volumes = points.map((point) => (Number.isFinite(point.v) ? point.v : 0));
-      const maxVolume = Math.max(...volumes, 1);
+      let maxVolume = 1;
+      for (let index = from; index <= to; index += 1) {
+        const volume = Number(points[index].v) || 0;
+        if (volume > maxVolume) maxVolume = volume;
+      }
       const baseY = plot.priceBottom + height;
       ctx.save();
-      for (let index = 0; index < count; index += 1) {
+      for (let index = from; index <= to; index += 1) {
         const point = points[index];
-        const volume = volumes[index];
+        const volume = Number(point.v) || 0;
         if (!volume) continue;
         const isUp = point.c >= point.o;
         const barHeight = Math.max(1, (volume / maxVolume) * height * 0.9);
@@ -631,12 +875,13 @@
       ctx.restore();
     }
 
-    drawAxisDates(ctx, points, period, xFor, plot, width, height) {
-      const count = points.length;
+    drawAxisDates(ctx, points, period, xFor, plot, width, height, visibleStart, visibleEnd) {
+      const first = visibleStart === undefined ? 0 : visibleStart;
+      const last = visibleEnd === undefined ? points.length - 1 : visibleEnd;
       const tickCount = width < 480 ? 3 : width < 720 ? 4 : 5;
       const indices = [];
       for (let tick = 0; tick <= tickCount; tick += 1) {
-        indices.push(Math.round((tick / tickCount) * (count - 1)));
+        indices.push(Math.round(first + (tick / tickCount) * (last - first)));
       }
       const unique = [...new Set(indices)];
       ctx.save();
@@ -656,13 +901,15 @@
       ctx.restore();
     }
 
-    drawLastMarker(ctx, points, xFor, yFor, plot, period) {
-      const last = points[points.length - 1];
-      if (!Number.isFinite(last.c)) return;
-      const x = xFor(points.length - 1);
+    drawLastMarker(ctx, points, xFor, yFor, plot, period, visibleStart, visibleEnd) {
+      const to = visibleEnd === undefined ? points.length - 1 : visibleEnd;
+      const last = points[to];
+      if (!last || !Number.isFinite(last.c)) return;
+      const x = xFor(to);
       const y = yFor(last.c);
       this.lastLondonY = y;
-      const reference = period === "intraday" ? this.data.prev_close : points[0].c;
+      const from = visibleStart === undefined ? 0 : visibleStart;
+      const reference = period === "intraday" ? this.data.prev_close : points[from].c;
       const trend = trendOf(last.c, reference);
       const color = trend === "up" ? COLORS.up : trend === "down" ? COLORS.down : COLORS.flat;
 
@@ -703,14 +950,24 @@
       if (!overlay.length) return;
       const color = COLORS.sge;
       let lastY = null;
+      // On a candle chart the overlay follows the same index window; on the
+      // intraday chart it is normalised across the whole session.
+      const points = this.geometry ? this.geometry.points : [];
+      const from = this.geometry ? this.geometry.visibleStart : 0;
+      const to = this.geometry ? this.geometry.visibleEnd : points.length - 1;
+      const fromTime = points[from] ? points[from].t : -Infinity;
+      const toTime = points[to] ? points[to].t : Infinity;
+
       ctx.save();
       ctx.beginPath();
       let started = false;
       overlay.forEach((point, index) => {
         if (!Number.isFinite(point.c)) return;
+        if (!normalized && (point.t < fromTime || point.t > toTime)) return;
         const x = normalized
           ? plot.left + (index / Math.max(1, overlay.length - 1)) * plot.width
-          : this.overlayX(point, plot);
+          : xFor(this.indexAtTime(point.t));
+        if (x < plot.left - 2 || x > plot.left + plot.width + 2) return;
         const y = yFor(point.c);
         if (!started) {
           ctx.moveTo(x, y);
@@ -738,9 +995,27 @@
 
     drawOverlayMarker(ctx, overlay, xFor, yFor, plot) {
       if (!overlay.length) return;
-      const last = overlay[overlay.length - 1];
-      if (!Number.isFinite(last.c)) return;
-      const x = this.period === "intraday" ? plot.left + plot.width : this.overlayX(last, plot);
+      const points = this.geometry ? this.geometry.points : [];
+      const from = this.geometry ? this.geometry.visibleStart : 0;
+      const to = this.geometry ? this.geometry.visibleEnd : points.length - 1;
+      let last = null;
+      if (this.period === "intraday") {
+        last = overlay[overlay.length - 1];
+      } else {
+        const toTime = points[to] ? points[to].t : Infinity;
+        for (let index = overlay.length - 1; index >= 0; index -= 1) {
+          if (overlay[index].t <= toTime) {
+            last = overlay[index];
+            break;
+          }
+        }
+      }
+      if (!last || !Number.isFinite(last.c)) return;
+      const x =
+        this.period === "intraday"
+          ? plot.left + plot.width
+          : xFor(this.indexAtTime(last.t));
+      if (x < plot.left - 2 || x > plot.left + plot.width + 2) return;
       const y = yFor(last.c);
       const color = COLORS.sge;
 
