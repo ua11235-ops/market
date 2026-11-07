@@ -1026,23 +1026,24 @@
       if (!overlay.length) return;
       const color = COLORS.sge;
       let lastY = null;
-      // On a candle chart the overlay follows the same index window; on the
-      // intraday chart it is normalised across the whole session.
       const points = this.geometry ? this.geometry.points : [];
       const from = this.geometry ? this.geometry.visibleStart : 0;
       const to = this.geometry ? this.geometry.visibleEnd : points.length - 1;
-      const fromTime = points[from] ? points[from].t : -Infinity;
-      const toTime = points[to] ? points[to].t : Infinity;
+
+      // The overlay is always placed through the shared axis, so zooming and
+      // panning move it together with the main series.
+      const overlayX = (point, index) => {
+        if (!normalized) return xFor(this.indexAtTime(point.t));
+        return this.intradayX(index, plot);
+      };
 
       ctx.save();
       ctx.beginPath();
       let started = false;
       overlay.forEach((point, index) => {
         if (!Number.isFinite(point.c)) return;
-        if (!normalized && (point.t < fromTime || point.t > toTime)) return;
-        const x = normalized
-          ? plot.left + (index / Math.max(1, overlay.length - 1)) * plot.width
-          : xFor(this.indexAtTime(point.t));
+        const x = overlayX(point, index);
+        if (!Number.isFinite(x)) return;
         if (x < plot.left - 2 || x > plot.left + plot.width + 2) return;
         const y = yFor(point.c);
         if (!started) {
@@ -1069,6 +1070,22 @@
       this.overlayLastY = lastY;
     }
 
+    /* Position an intraday overlay point on the shared session axis.
+     *
+     * Both intraday series are normalised over their own session, so a point at
+     * 50% of the Shanghai session lines up with 50% of the London session.  The
+     * result is then projected through the current zoom window, which is what
+     * makes the overlay follow wheel zoom and dragging. */
+    intradayX(index, plot) {
+      const overlay = this.overlayPoints();
+      if (!overlay.length) return NaN;
+      const ratio = overlay.length > 1 ? index / (overlay.length - 1) : 0;
+      const total = Math.max(1, this.pointCount() - 1);
+      const virtualIndex = ratio * total;
+      const span = Math.max(1e-9, this.view.end - this.view.start);
+      return plot.left + ((virtualIndex - this.view.start) / span) * plot.width;
+    }
+
     drawOverlayMarker(ctx, overlay, xFor, yFor, plot) {
       if (!overlay.length) return;
       const points = this.geometry ? this.geometry.points : [];
@@ -1089,7 +1106,7 @@
       if (!last || !Number.isFinite(last.c)) return;
       const x =
         this.period === "intraday"
-          ? plot.left + plot.width
+          ? this.intradayX(overlay.length - 1, plot)
           : xFor(this.indexAtTime(last.t));
       if (x < plot.left - 2 || x > plot.left + plot.width + 2) return;
       const y = yFor(last.c);
