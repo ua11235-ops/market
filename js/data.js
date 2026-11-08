@@ -287,6 +287,17 @@
   const SHANGHAI_GOLD_SECID = "118.AU9999";
   const FX_SECID = "133.USDCNH";
 
+  /* Local (Beijing) hour at which each venue opens its trading day.  The
+   * intraday feed returns the last two sessions glued together, so the chart
+   * needs to know where one session ends and the next begins.  Measured from
+   * the trends2 feed: COMEX gold 07:00 with a 06:00-07:00 break, Shanghai gold
+   * night leg 20:00.  A股-style venues (09:30) never straddle midnight and are
+   * left out on purpose: their last calendar day is already one session. */
+  const SESSION_OPEN_HOUR = {
+    "101.GC00Y": 7,
+    "118.AU9999": 20,
+  };
+
   function fetchUsdCny() {
     return cached("fx", 60000, () =>
       singleQuote(FX_SECID).then((row) => {
@@ -376,21 +387,33 @@
         });
       });
       if (!points.length) throw new Error("暂无分时数据");
-      /* A session runs overnight: the night leg starts around 20:00 and rolls
-       * into the next calendar day.  Slice the most recent *complete* session
-       * instead of the last calendar date, so the night leg and the following
-       * day session stay together. */
+      /* A session does not start at midnight, and where it starts depends on
+       * the venue.  COMEX gold trades 07:00 -> 06:00 (next day) while the
+       * Shanghai gold night leg opens at 20:00, so no single hard-coded hour
+       * works: 18:00 truncates the London curve, and the last calendar date
+       * glues two sessions together.  Walk back from the newest tick to the
+       * most recent opening of *this* instrument and keep everything after it.
+       * Venues whose session never crosses midnight (A股 09:30-15:00) simply
+       * fall back to the last calendar day, which is already one session. */
       const last = points[points.length - 1].t;
       const lastLocal = new Date(last + 8 * 3600 * 1000);
-      const sessionStart = new Date(lastLocal.getTime());
-      // The session opens around 18:00-20:00 and runs through the next
-      // afternoon, so anything before 18:00 belongs to yesterday's start.
-      if (lastLocal.getUTCHours() < 18) {
-        sessionStart.setUTCDate(sessionStart.getUTCDate() - 1);
+      const openHour = SESSION_OPEN_HOUR[secid];
+      let session = points;
+      if (Number.isFinite(openHour)) {
+        const boundary = new Date(lastLocal.getTime());
+        boundary.setUTCHours(Math.floor(openHour), (openHour % 1) * 60, 0, 0);
+        while (boundary.getTime() > lastLocal.getTime()) {
+          boundary.setUTCDate(boundary.getUTCDate() - 1);
+        }
+        const startMs = boundary.getTime() - 8 * 3600 * 1000;
+        session = points.filter((point) => point.t >= startMs);
+      } else {
+        const lastDay = new Date(last + 8 * 3600 * 1000).toISOString().slice(0, 10);
+        session = points.filter(
+          (point) =>
+            new Date(point.t + 8 * 3600 * 1000).toISOString().slice(0, 10) === lastDay
+        );
       }
-      sessionStart.setUTCHours(18, 0, 0, 0);
-      const startMs = sessionStart.getTime() - 8 * 3600 * 1000;
-      const session = points.filter((point) => point.t >= startMs);
       return {
         prev_close: scaled(data.preClose),
         points: session.length > 20 ? session : points,
