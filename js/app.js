@@ -45,6 +45,15 @@
     hour12: false,
   });
 
+  /* ``as_of`` is an ISO-8601 UTC string; slicing it would show UTC while the
+   * clock next to it shows Beijing time, so render it through the same
+   * formatter the clock uses. */
+  function formatClockTime(value) {
+    const moment = value instanceof Date ? value : new Date(value);
+    if (Number.isNaN(moment.getTime())) return "";
+    return clockFormatter.format(moment);
+  }
+
   const shortDateFormatter = new Intl.DateTimeFormat("zh-CN", {
     timeZone: "Asia/Shanghai",
     month: "2-digit",
@@ -419,13 +428,13 @@
     } else {
       setConnection("live", payload.source);
       const pill = $("connection-pill");
-      if (pill) pill.title = `${payload.source} · 更新于 ${payload.as_of}`;
+      if (pill) pill.title = `${payload.source} · 更新于 ${formatClockTime(payload.as_of)}`;
       state.lastWarning = "";
     }
     if (payload.as_of) {
       const updated = document.querySelector(".market-footnote > span:first-child");
       if (updated) {
-        const time = String(payload.as_of).slice(11, 19);
+        const time = formatClockTime(payload.as_of);
         updated.innerHTML = `<i class="status-dot"></i>行情更新 ${escapeHtml(time)} · 公开数据可能存在延迟`;
       }
     }

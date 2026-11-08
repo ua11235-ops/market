@@ -64,7 +64,8 @@ js/data.js            行情数据层（JSONP 抓取、折算、缓存与重试�
 js/chart.js           Canvas 图表引擎（K 线 / 分时 / 双序列叠加）
 js/app.js             页面交互与刷新调度
 favicon.svg           站点图标
-_desktop/             早期 Windows 桌面版源码（保留存档，不参与网页构建）
+preview*.png          页面截图（README 展示用）
+.github/workflows/    GitHub Pages 自动部署
 ```
 
 ## 技术说明
