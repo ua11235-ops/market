@@ -27,6 +27,14 @@
         lastLoadedAt: 0,
         stale: false,
       },
+      moutai: {
+        period: "daily-line",
+        dataPeriod: null,
+        controller: null,
+        loading: false,
+        lastLoadedAt: 0,
+        stale: false,
+      },
     },
     lastWarning: "",
     toastTimer: 0,
@@ -36,6 +44,16 @@
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   });
+
+  /* Moutai trades in whole yuan, so no decimal places. */
+  const moutaiFormat = new Intl.NumberFormat("en-US", {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0,
+  });
+
+  function moutaiNumber(value) {
+    return Number.isFinite(Number(value)) ? moutaiFormat.format(Number(value)) : "—";
+  }
 
   const clockFormatter = new Intl.DateTimeFormat("zh-CN", {
     timeZone: "Asia/Shanghai",
@@ -513,6 +531,62 @@
     note.textContent = `上海金 Au99.99 同期区间 ${span}，与伦敦金现按日期对齐后叠加。`;
   }
 
+  function updateMoutaiHeader(payload) {
+    if (!payload || !payload.latest) return;
+    const latest = payload.latest;
+    const price = $("moutai-price");
+    if (price) {
+      price.textContent = moutaiNumber(latest.price);
+      price.classList.remove("is-flashing");
+      void price.offsetWidth;
+      price.classList.add("is-flashing");
+    }
+    const change = $("moutai-change");
+    if (change) {
+      const sign = latest.change > 0 ? "+" : "";
+      const pctSign = latest.change_pct > 0 ? "+" : "";
+      change.textContent =
+        `年初至今 ${sign}${moutaiNumber(latest.change)}` +
+        ` (${pctSign}${numberFormat.format(latest.change_pct)}%)`;
+      change.classList.remove("is-up", "is-down", "is-flat");
+      change.classList.add(
+        latest.change > 0 ? "is-up" : latest.change < 0 ? "is-down" : "is-flat"
+      );
+    }
+    const stats = $("moutai-stats");
+    if (stats) {
+      const fields = {
+        latest: moutaiNumber(latest.price),
+        yearStart: moutaiNumber(latest.year_start),
+        high: moutaiNumber(latest.high),
+        low: moutaiNumber(latest.low),
+      };
+      Object.entries(fields).forEach(([key, value]) => {
+        const node = stats.querySelector(`[data-field="${key}"]`);
+        if (node) node.textContent = value;
+      });
+    }
+  }
+
+  function updateMoutaiMeta(payload) {
+    const updated = $("moutai-updated");
+    if (updated && payload.latest) {
+      updated.textContent = `${payload.latest.span} · 共 ${payload.latest.days} 个交易日`;
+    }
+    const source = $("moutai-source");
+    if (source && payload.source) source.textContent = payload.source;
+  }
+
+  function updateMoutaiNote(payload) {
+    const note = $("moutai-note");
+    if (!note || !payload.latest) return;
+    const latest = payload.latest;
+    note.hidden = false;
+    note.textContent =
+      `53度 500ml 散瓶批发参考价（${latest.span}，共 ${latest.days} 个交易日），` +
+      "数据来自聚金数据，非交易所行情；页面内置快照，不会自动更新。";
+  }
+
   function updateLegend(symbol, payload) {
     const legend = $(`${symbol}-legend`);
     if (!legend) return;
@@ -533,6 +607,10 @@
       legend.innerHTML = items.join("");
       return;
     }
+    if (symbol === "moutai") {
+      legend.innerHTML = '<span class="legend-item legend-price"><i></i>散瓶批价</span>';
+      return;
+    }
     if (payload.period === "intraday") {
       const hasAverage = payload.points.some((point) => Number.isFinite(point.avg));
       legend.innerHTML = hasAverage
@@ -549,13 +627,21 @@
   function updateChartMeta(symbol, payload) {
     const stateElement = $(`${symbol}-state`);
     if (stateElement) {
-      stateElement.textContent = payload.stale ? "缓存" : "实时";
-      stateElement.classList.toggle("is-stale", Boolean(payload.stale));
+      if (symbol === "moutai") {
+        // A bundled snapshot, never a live quote.
+        stateElement.textContent = "历史数据";
+        stateElement.classList.add("is-static");
+        stateElement.classList.remove("is-stale");
+      } else {
+        stateElement.textContent = payload.stale ? "缓存" : "实时";
+        stateElement.classList.toggle("is-stale", Boolean(payload.stale));
+        stateElement.classList.remove("is-static");
+      }
     }
     const source = $(`${symbol}-source`);
     if (source && payload.source) source.textContent = payload.source;
     const updated = $(`${symbol}-updated`);
-    if (updated && payload.points.length) {
+    if (symbol !== "moutai" && updated && payload.points.length) {
       let text = `截至 ${formatChartDate(payload.points[payload.points.length - 1].t)}`;
       if (symbol === "gold" && Number.isFinite(Number(payload.fx))) {
         text += ` · 汇率 ${formatNumber(payload.fx, 4)}`;
@@ -646,9 +732,14 @@
       updateChartMeta(symbol, payload);
       updateLegend(symbol, payload);
       if (symbol === "gold") updateGoldNote(payload);
+      if (symbol === "moutai") {
+        updateMoutaiHeader(payload);
+        updateMoutaiMeta(payload);
+        updateMoutaiNote(payload);
+      }
       if (empty) empty.hidden = true;
       if (payload.stale && payload.warning) {
-        toast(`${symbol === "gold" ? "黄金" : "科创50"}：${payload.warning}`, 5600);
+        toast(`${symbol === "gold" ? "黄金" : symbol === "moutai" ? "茅台" : "科创50"}：${payload.warning}`, 5600);
       }
     } catch (error) {
       if (controller.signal.aborted) return;
@@ -739,6 +830,10 @@
       symbol: "star50",
       accent: "#65aaff",
     });
+    charts.moutai = new MarketChart($("moutai-chart"), $("moutai-tooltip"), {
+      symbol: "moutai",
+      accent: "#e2745c",
+    });
   }
 
   function startTimers() {
@@ -791,6 +886,8 @@
       await loadDashboard(false, false);
       await loadChart("gold", "intraday", { silent: false });
       await loadChart("star50", "intraday", { silent: false });
+      // Moutai ships with the page, so it never contends with the quote feed.
+      await loadChart("moutai", "daily-line", { silent: false });
     })();
     startTimers();
   }
