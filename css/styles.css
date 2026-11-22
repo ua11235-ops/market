@@ -692,6 +692,24 @@ a {
   --panel-aura: rgba(70, 137, 220, 0.055);
 }
 
+#moutai-panel {
+  --panel-aura: rgba(214, 148, 92, 0.05);
+  grid-column: 1 / -1;
+}
+
+.panel-accent--red {
+  background: linear-gradient(90deg, transparent, rgba(226, 116, 92, 0.62), transparent);
+}
+
+.asset-icon--red {
+  border-color: rgba(226, 116, 92, 0.22);
+  background: rgba(226, 116, 92, 0.06);
+}
+
+.asset-icon--red svg {
+  stroke: #e2745c;
+}
+
 .panel-accent {
   position: absolute;
   top: 0;
@@ -801,6 +819,12 @@ a {
   border-color: rgba(233, 186, 104, 0.25);
   background: rgba(233, 186, 104, 0.06);
   color: var(--gold);
+}
+
+.data-badge.is-static {
+  border-color: rgba(226, 116, 92, 0.26);
+  background: rgba(226, 116, 92, 0.07);
+  color: #e2745c;
 }
 
 .asset-identity p {
@@ -1071,6 +1095,7 @@ a {
 .legend-ma10 { --legend-color: #5b9dff; }
 .legend-ma20 { --legend-color: #b98cff; }
 .legend-london { --legend-color: #e9ba68; }
+.legend-price { --legend-color: #e2745c; }
 .legend-sge { --legend-color: #7fd8c8; }
 .legend-sge i { background: repeating-linear-gradient(90deg, var(--legend-color) 0 3px, transparent 3px 5px); }
 .legend-avg { --legend-color: #91a4b9; }
@@ -1346,6 +1371,10 @@ a {
 
 .source-badge--blue i {
   background: var(--blue);
+}
+
+.source-badge--red i {
+  background: #e2745c;
 }
 
 .footer-divider {
