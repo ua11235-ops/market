@@ -651,7 +651,100 @@
     }));
   }
 
+  /* ---- 飞天茅台 500ml -----------------------------------------------------
+   * 聚金数据 publishes the wholesale reference price for a 53%vol / 500ml
+   * loose bottle, but their endpoint is AES-encrypted behind a bot challenge,
+   * so the series is snapshotted into js/moutai-data.js instead of being
+   * fetched at runtime.  Everything below is real data, not an estimate.
+   * ---------------------------------------------------------------------- */
+
+  const MOUTAI_PERIODS = ["daily-line", "week-line", "month-line"];
+
+  function moutaiPayload() {
+    return global.AurumMoutaiData || null;
+  }
+
+  /* Bucket the daily rows into weeks (Monday-based) or calendar months and
+   * keep the last price of each bucket. */
+  function moutaiBucketed(rows, period) {
+    if (period === "daily-line") {
+      return rows.map((row) => ({
+        key: row.date,
+        t: Date.parse(`${row.date}T00:00:00Z`),
+        c: row.price,
+      }));
+    }
+
+    const buckets = new Map();
+    for (const row of rows) {
+      const date = new Date(`${row.date}T00:00:00Z`);
+      let key;
+      let stamp;
+      if (period === "week-line") {
+        // ISO-ish week start (Monday).
+        const day = (date.getUTCDay() + 6) % 7;
+        const monday = new Date(date.getTime() - day * 86400000);
+        stamp = monday.getTime();
+        key = monday.toISOString().slice(0, 10);
+      } else {
+        stamp = Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), 1);
+        key = row.date.slice(0, 7);
+      }
+      buckets.set(key, { key, t: stamp, c: row.price });
+    }
+    return [...buckets.values()].sort((a, b) => a.t - b.t);
+  }
+
+  function buildMoutaiChart(period) {
+    const bundle = moutaiPayload();
+    if (!bundle || !Array.isArray(bundle.daily) || bundle.daily.length < 2) {
+      return Promise.reject(new Error("茅台数据缺失"));
+    }
+
+    const rows = bundle.daily.slice().sort((a, b) => a.date.localeCompare(b.date));
+    const points = moutaiBucketed(rows, period);
+
+    const latest = rows[rows.length - 1];
+    const first = rows[0];
+    const prices = rows.map((row) => row.price);
+    const yearStr = latest.date.slice(0, 4);
+    const yearRows = rows.filter((row) => row.date.startsWith(yearStr));
+    const yearStart = yearRows.length ? yearRows[0].price : first.price;
+    const change = latest.price - yearStart;
+    const changePct = yearStart ? (change / yearStart) * 100 : 0;
+
+    return Promise.resolve({
+      ok: true,
+      stale: false,
+      symbol: "moutai",
+      period,
+      precision: 0,
+      line: true,
+      source: "聚金数据",
+      as_of: latest.date,
+      unit: "元/瓶",
+      unit_label: "元/瓶",
+      prev_close: yearStart,
+      latest: {
+        price: latest.price,
+        date: latest.date,
+        change,
+        change_pct: round(changePct, 2),
+        year_start: yearStart,
+        high: Math.max(...prices),
+        low: Math.min(...prices),
+        span: `${first.date} ~ ${latest.date}`,
+        days: rows.length,
+      },
+      points,
+    });
+  }
+
   function getChart(symbol, period) {
+    if (symbol === "moutai") {
+      // Snapshotted data, so it needs no network round trip or cache entry.
+      return buildMoutaiChart(period);
+    }
     const key = `chart:${symbol}:${period}`;
     const ttl = period === "intraday" ? 30000 : 120000;
     return cached(key, ttl, () =>
@@ -666,5 +759,6 @@
     fetchUsdCny,
     invalidate,
     TROY_OUNCE_GRAMS,
+    MOUTAI_PERIODS,
   };
 })(window);
