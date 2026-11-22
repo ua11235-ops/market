@@ -62,6 +62,9 @@
 
   function formatAxisTime(timestamp, period) {
     if (period === "intraday") return timeFormatter.format(new Date(timestamp));
+    if (period === "month-line") {
+      return monthFormatter.format(new Date(timestamp)).replace("/", "/");
+    }
     if (period === "month") return monthFormatter.format(new Date(timestamp)).replace("/", "/");
     const parts = partsFor(timestamp, dateFormatter);
     return `${parts.month}/${parts.day}`;
@@ -78,6 +81,9 @@
   function formatTooltipDate(timestamp, period) {
     if (period === "intraday") return formatFullTime(timestamp, period);
     const parts = partsFor(timestamp, fullFormatter);
+    if (period === "daily-line") return `${parts.year}年${parts.month}月${parts.day}日`;
+    if (period === "week-line") return `${parts.year}年${parts.month}月${parts.day}日 · 周`;
+    if (period === "month-line") return `${parts.year}年${parts.month}月 · 月线`;
     const suffix = { day: "日K", week: "周K", month: "月K" }[period] || "K线";
     return `${parts.year}年${parts.month}月${parts.day}日 · ${suffix}`;
   }
@@ -156,6 +162,16 @@
 
     pointCount() {
       return this.data && Array.isArray(this.data.points) ? this.data.points.length : 0;
+    }
+
+    /* Decimal places the price tags use; Moutai is quoted in whole yuan. */
+    priceDigits() {
+      return this.data && Number.isFinite(this.data.precision) ? this.data.precision : 2;
+    }
+
+    /* When the payload asks for it, candles are replaced by a single line. */
+    isLineMode() {
+      return Boolean(this.data && this.data.line === true);
     }
 
     /* Keep the window inside the series and never let it collapse to nothing. */
@@ -569,6 +585,7 @@
       const highs = [];
       const lows = [];
       const overlay = this.overlayPoints();
+      const lineMode = this.isLineMode();
       for (const point of points.slice(visibleStart, visibleEnd + 1)) {
         if (Number.isFinite(point.h)) highs.push(point.h);
         if (Number.isFinite(point.l)) lows.push(point.l);
@@ -576,6 +593,11 @@
           if (Number.isFinite(point[key])) highs.push(point[key]);
         }
         if (period === "intraday" && Number.isFinite(point.avg)) highs.push(point.avg);
+        // A line series has no high/low, so the close carries the range.
+        if (lineMode && Number.isFinite(point.c)) {
+          highs.push(point.c);
+          lows.push(point.c);
+        }
       }
       // Overlay values inside the same window must also fit.
       const visibleOverlay = this.visibleOverlay(overlay, points, visibleStart, visibleEnd);
@@ -651,6 +673,10 @@
         this.drawIntraday(ctx, points, xFor, yFor, plot, visibleStart, visibleEnd);
         this.drawOverlayLine(ctx, overlay, xFor, yFor, plot, false, true);
       } else if (period === "intraday") {
+        this.drawIntraday(ctx, points, xFor, yFor, plot, visibleStart, visibleEnd);
+      } else if (this.isLineMode()) {
+        // Price series such as Moutai's wholesale reference are shown as a
+        // plain line rather than candles.
         this.drawIntraday(ctx, points, xFor, yFor, plot, visibleStart, visibleEnd);
       } else {
         this.drawCandles(ctx, points, xFor, yFor, plot, visibleStart, visibleEnd);
@@ -1003,7 +1029,7 @@
       ctx.shadowBlur = 0;
 
       // A small price tag attached to the right axis.
-      const label = formatNumber(last.c, 2);
+      const label = formatNumber(last.c, this.priceDigits());
       ctx.font = '11px "Bahnschrift", "Segoe UI", sans-serif';
       const textWidth = ctx.measureText(label).width;
       const tagWidth = textWidth + 12;
@@ -1121,7 +1147,7 @@
       ctx.fill();
       ctx.shadowBlur = 0;
 
-      const label = formatNumber(last.c, 2);
+      const label = formatNumber(last.c, this.priceDigits());
       ctx.font = '11px "Bahnschrift", "Segoe UI", sans-serif';
       const tagWidth = ctx.measureText(label).width + 12;
       const tagX = plot.left + plot.width + 2;
@@ -1174,7 +1200,7 @@
       const index = this.hoverIndex;
       const point = points[index];
       if (!point) return;
-      const digits = 2;
+      const digits = this.priceDigits();
       const reference =
         this.period === "intraday" && Number.isFinite(this.data.prev_close)
           ? this.data.prev_close
@@ -1187,7 +1213,7 @@
       const unit = this.data && this.data.unit_label ? ` · ${this.data.unit_label}` : "";
       let html = `<div class="tooltip-head">${formatTooltipDate(point.t, this.period)}${unit}</div>`;
 
-      if (this.period === "intraday") {
+      if (this.period === "intraday" || this.isLineMode()) {
         html += '<div class="tooltip-grid">';
         html += `<span>价格</span><b>${formatNumber(point.c, digits)}</b>`;
         if (Number.isFinite(point.avg)) {
