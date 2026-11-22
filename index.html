@@ -7,7 +7,7 @@
   <meta name="theme-color" content="#05080c">
   <title>金市 · 全球行情</title>
   <link rel="icon" href="favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="css/styles.css?v=10">
+  <link rel="stylesheet" href="css/styles.css?v=11">
 </head>
 <body>
   <div class="page-glow page-glow--gold" aria-hidden="true"></div>
@@ -232,6 +232,70 @@
           <span class="footer-note">滚轮缩放 · 拖动平移 · 双击复位</span>
         </footer>
       </article>
+
+      <article class="chart-panel" id="moutai-panel" data-symbol="moutai">
+        <div class="panel-accent panel-accent--red" aria-hidden="true"></div>
+        <header class="asset-header">
+          <div class="asset-identity">
+            <span class="asset-icon asset-icon--red" aria-hidden="true">
+              <svg viewBox="0 0 32 32">
+                <path d="M13 5.5h6v2.2l1.6 1.1c.9.6 1.4 1.6 1.4 2.7v13.9a2.1 2.1 0 0 1-2.1 2.1h-7.8A2.1 2.1 0 0 1 10 25.4V11.5c0-1.1.5-2.1 1.4-2.7L13 7.7V5.5Z" />
+                <path d="M10.4 13.2h11.2M12.6 18.4h6.8" class="dim" />
+              </svg>
+            </span>
+            <div>
+              <div class="asset-title-row">
+                <h2>飞天茅台 500ml</h2>
+                <span class="asset-code">53%vol · 散瓶</span>
+                <span class="data-badge is-static" id="moutai-state">历史数据</span>
+              </div>
+              <p>贵州茅台酒 · 散瓶批发参考价 · 人民币</p>
+            </div>
+          </div>
+          <div class="asset-price-block">
+            <div class="asset-price" id="moutai-price">—</div>
+            <div class="asset-change" id="moutai-change">载入中</div>
+          </div>
+        </header>
+
+        <div class="quote-strip" id="moutai-stats">
+          <div><span>最新</span><strong data-field="latest">—</strong></div>
+          <div><span>年初</span><strong data-field="yearStart">—</strong></div>
+          <div><span>区间最高</span><strong data-field="high">—</strong></div>
+          <div><span>区间最低</span><strong data-field="low">—</strong></div>
+        </div>
+
+        <div class="chart-toolbar">
+          <div class="timeframe-group" role="group" aria-label="茅台周期">
+            <button type="button" data-symbol="moutai" data-period="daily-line" class="is-active">日线</button>
+            <button type="button" data-symbol="moutai" data-period="week-line">周线</button>
+            <button type="button" data-symbol="moutai" data-period="month-line">月线</button>
+          </div>
+          <div class="chart-legend" id="moutai-legend">
+            <span class="legend-item legend-price"><i></i>散瓶批价</span>
+          </div>
+        </div>
+
+        <div class="chart-note" id="moutai-note" hidden></div>
+
+        <div class="chart-wrap" id="moutai-chart-wrap">
+          <canvas id="moutai-chart" role="img" aria-label="飞天茅台500ml价格走势图"></canvas>
+          <div class="chart-zoom-badge" id="moutai-zoom-badge"></div>
+          <div class="chart-tooltip" id="moutai-tooltip" role="status"></div>
+          <div class="chart-loading" id="moutai-loading">
+            <span class="spinner"></span><span>正在载入走势</span>
+          </div>
+          <div class="chart-empty" id="moutai-empty" hidden>暂无可用走势数据</div>
+        </div>
+
+        <footer class="panel-footer">
+          <span class="source-badge source-badge--red"><i></i><span id="moutai-source">聚金数据</span></span>
+          <span class="footer-divider"></span>
+          <span id="moutai-updated">数据载入中</span>
+          <span class="footer-spacer"></span>
+          <span class="footer-note">滚轮缩放 · 拖动平移 · 双击复位</span>
+        </footer>
+      </article>
     </section>
 
     <footer class="page-footer">
@@ -243,8 +307,9 @@
 
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
-  <script src="js/data.js?v=10"></script>
-  <script src="js/chart.js?v=10"></script>
-  <script src="js/app.js?v=10"></script>
+  <script src="js/moutai-data.js?v=11"></script>
+  <script src="js/data.js?v=11"></script>
+  <script src="js/chart.js?v=11"></script>
+  <script src="js/app.js?v=11"></script>
 </body>
 </html>
