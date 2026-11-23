@@ -59,15 +59,39 @@ python -m http.server 8000
 
 ## 茅台数据说明
 
-飞天茅台面板与其他面板有本质区别：聚金数据的接口带反爬与加密，**不在运行时抓取**，
-而是把序列快照进 `js/moutai-data.js`（`window.AurumMoutaiData`）。
+飞天茅台面板与其他面板有本质区别：聚金数据在运行时抓不到（EdgeOne 拦无头浏览器、
+接口返回 AES 密文），所以数据**构建期抓取、快照进仓库**，
+存在 `js/moutai-data.js`（`window.AurumMoutaiData`）。
 
-- 该序列是**日频自然日**数据，含周末（当前快照 320 天中有 73 天是周末），
+- 该序列是**日频自然日**数据，含周末（当前快照 321 天中有 73 天是周末），
   因此页面标注为「自然日」而非「交易日」，不要改回「交易日」
-- 快照不会自动更新；要更新，需重新抓取聚金数据并替换 `js/moutai-data.js` 里的 `daily` 数组
+- 快照由 `scripts/fetch-moutai.js` 生成，**不要手改**；每天 09:10 由本机计划任务更新，
+  有变化会自动 commit 并 push
 - 周线按 ISO 周（周一起）取该周最后一个价格，月线取该月最后一个价格；
   聚合在 `js/data.js` 的 `moutaiBucketed()` 里做，页面只拿到折线点
 - 该价格是批发参考价，不是交易所行情，不构成投资建议
+
+### 更新茅台数据
+
+```powershell
+# 手动抓一次（有变化会自动提交并推送）
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\run-daily.ps1
+
+# 只抓不写，看看上游有什么
+node scripts\fetch-moutai.js --dry-run
+
+# 安装 / 卸载每天的定时任务
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\install-task.ps1 -Time '09:10'
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\install-task.ps1 -Remove
+```
+
+需要在用户环境变量里配 `AURUM_NODE`（node 路径）、`AURUM_GIT`（git 路径）、
+`AURUM_GIT_TOKEN`（GitHub PAT，contents:write）。缺 token 时只提交到本地、不推送。
+日志在 `.tmp\moutai-fetch.log`。
+
+> 抓取必须在**有头** Chrome 里跑：实测同一个出口 IP 下，有头能过、无头被拦，
+> UA/stealth 伪装都无效。所以这套定时任务只能跑在本机，不能放 GitHub Actions 托管 runner。
+
 
 ## 项目结构
 
@@ -78,6 +102,9 @@ js/data.js            行情数据层（JSONP 抓取、折算、缓存与重试�
 js/moutai-data.js     飞天茅台价格快照数据（window.AurumMoutaiData）
 js/chart.js           Canvas 图表引擎（K 线 / 分时 / 折线 / 双序列叠加）
 js/app.js             页面交互与刷新调度
+scripts/fetch-moutai.js   抓茅台批价（真实 Chrome，页面自解密）
+scripts/run-daily.ps1     抓取 + 有变化则提交推送
+scripts/install-task.ps1  注册/卸载每日计划任务
 favicon.svg           站点图标
 preview*.png          页面截图（README 展示用）
 .github/workflows/    GitHub Pages 自动部署
@@ -93,9 +120,11 @@ preview*.png          页面截图（README 展示用）
 ## 改代码时注意
 
 - 改任何 `js/*.js` 或 `css/*.css` 后，必须把 `index.html` 里 5 处 `?v=` 一起递增，
-  否则回访用户会继续跑缓存里的旧文件
+  否则回访用户会继续跑缓存里的旧文件（抓取脚本会自动做这件事）
 - 仓库用 `.gitattributes` 统一为 LF；不要在 Windows 上按 CRLF 整文件重写，
   否则一次改动会变成「每一行都改了」的 diff
+- `scripts/*.ps1` 例外：固定 `eol=crlf` 且必须带 UTF-8 BOM，否则
+  Windows PowerShell 5.1 会按 GBK 解析中文注释直接报语法错误
 
 ## 许可
 

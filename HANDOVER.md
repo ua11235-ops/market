@@ -71,6 +71,46 @@
 （320 / 52 / 13 个点，与独立重算一致）、滚轮缩放（徽标 `123 / 320 根 · 双击复位`）、
 悬停十字光标与提示框、双击复位。
 
+### 0.5 茅台数据改为每日自动抓取（2026-11-23 晚）
+
+`scripts/fetch-moutai.js` 抓聚金数据，`scripts/run-daily.ps1` 负责提交推送，
+`scripts/install-task.ps1` 一键注册 Windows 计划任务（默认每天 09:10）。
+
+**为什么必须在有头浏览器里跑**（这决定了不能用 GitHub Actions 托管 runner）：
+
+同一出口 IP、交替各跑两次，只有无头与否不同：
+
+```
+有头 Chrome  24 rows / 14 rows  → 正常出表
+无头 Chrome   0 rows /  0 rows  → 「请求已被拦截」
+```
+
+UA 覆盖成普通 Chrome、抹掉 `navigator.webdriver`、伪造 plugins/WebGL/`window.chrome`、
+退回旧版 `--headless`，四种伪装**全部无效**。所以拦的是无头特征本身，不是 IP，
+也不是频率。Actions 托管 runner 是 Linux 无头 + 机房 IP，两条都踩，因此改用本机计划任务。
+
+**为什么不用别的数据源**：实测 30 多个候选站点，今日酒价/微酒/中国酒业协会域名解析不了；
+糖酒快讯、9998.tv 能开但页面里没有茅台批价；京东/天猫/酒仙网要人机验证且是零售价；
+东方财富有 600519 股价与白酒板块指数，但**那不是散瓶批价**，换过去面板语义就变了。
+结论：完整日频批价目前只有聚金数据一个可用来源。
+
+**实现要点**：
+
+- 不重写解密。`/getlist` 返回 AES-CBC 密文，密钥就写在该站自己的 `encrypt.js` 里；
+  脚本让页面自己发请求（签名头由它生成），再调页面自己的 `decryptAES()` 取明文。
+  站点换 key 也不会失效。
+- 上游是**滚动窗口**（当前约 1 年）。直接覆盖会静默丢掉更早历史，所以与现有快照合并。
+- 三道防呆：新数据少于现有 90% 拒绝写入；最新日期回退拒绝写入；数据无变化不写文件。
+- 数据变了自动递增 `index.html` 的 5 处 `?v=`，否则回访用户跑的还是缓存旧文件。
+- 提交作者是 `aurum-bot`，token 走环境变量 `AURUM_GIT_TOKEN` + 一次性
+  `http.extraheader`，不落进 `.git/config`。没有 token 时只提交不推送。
+
+相关环境变量（用户级，计划任务会读到）：
+`AURUM_NODE`（node 路径）、`AURUM_GIT`（git 路径）、`AURUM_GIT_TOKEN`（PAT）。
+
+> `.ps1` 必须带 **UTF-8 BOM**。Windows PowerShell 5.1 会把无 BOM 的 UTF-8 当 GBK 读，
+> 中文注释直接让脚本语法报错（本次踩过）。`.gitattributes` 里已固定 `*.ps1 eol=crlf`。
+
 ---
 
 ## 1. 这是什么
@@ -92,9 +132,12 @@
 | `index.html` | 页面结构，静态资源版本号（`?v=`） | 315 行 |
 | `css/styles.css` | 全部样式，暗色主题 | ~1680 行 |
 | `js/data.js` | 数据层：JSONP 抓取、序列排队、缓存、汇率折算、交易时段切分、茅台快照聚合 | ~700 行 |
-| `js/moutai-data.js` | 飞天茅台价格快照（`window.AurumMoutaiData`），不在运行时抓取 | 8 行（单行大 JSON） |
+| `js/moutai-data.js` | 飞天茅台价格快照（`window.AurumMoutaiData`），由脚本生成，勿手改 | 单行大 JSON |
 | `js/chart.js` | Canvas 2D 图表引擎：K 线、分时、折线、双序列叠加、缩放/平移/悬停 | ~1300 行 |
 | `js/app.js` | 页面控制器：渲染、刷新调度、区域/周期切换 | ~925 行 |
+| `scripts/fetch-moutai.js` | 抓茅台批价（真实 Chrome + 页面自解密），带合并与防呆 | ~340 行 |
+| `scripts/run-daily.ps1` | 抓取 + 有变化则 commit/push，供计划任务调用 | ~75 行 |
+| `scripts/install-task.ps1` | 一键注册/卸载 Windows 计划任务 | ~86 行 |
 
 各文件通过全局 `AurumData` / `AurumMoutaiData` / `MarketChart` 衔接，没有模块系统，
 `<script>` 顺序加载（`moutai-data.js` 必须在 `data.js` 之前）。
@@ -220,17 +263,25 @@ $ws   = "<仓库路径>"
   连续失败 2 次内会自动重试
 - 东方财富限流：保持串行队列，不要加并发；`QUOTE_BATCH = 30` 是批量报价上限。
   **手动验证时更要注意**，短时间多次请求会被封 IP，冷却十几分钟后恢复
-- 换行符：仓库已用 `.gitattributes` 统一 LF，别按 CRLF 整文件重写
+- 换行符：`.gitattributes` 统一 `eol=lf`，但 `*.ps1` 固定 `eol=crlf` 且必须带 BOM
+- **茅台快照不要手改**：由 `scripts/fetch-moutai.js` 生成，手改会在下次抓取时被合并覆盖
+- 计划任务相关：
+  - 手动跑一次：`.tmp\run-fetch-moutai.cmd`
+  - 看日志：`.tmp\moutai-fetch.log`
+  - 改时间：`scripts\install-task.ps1 -Time 'HH:mm'`
+  - 卸载：`scripts\install-task.ps1 -Remove`
+  - 抓取期间会弹出一个看不见的 Chrome 窗口（在屏幕左侧外），属正常
 
 ## 7. 后续怎么推送
 
-> 第二次接手复核：`github.com:443` 现在是通的，直连 `git push` 即可。
-> 本机已无 GitHub 凭据（无 PAT、无 SSH key），推送前仍需先配凭据。
+> 第三次接手复核：`github.com:443` 通，且已配好 PAT（环境变量 `AURUM_GIT_TOKEN`），
+> 直连 `git push` 可用。注意本机 git 推 Pull 需要
+> `-c http.sslBackend=openssl -c http.version=HTTP/1.1`，否则会 `Connection was reset`。
 
 仓库部署走 `.github/workflows/jekyll-gh-pages.yml`（推 main 自动发布到 GitHub Pages），
 所以推上去即自动生效，无需手动构建。
 
-本次**未推送**，2 个提交只在本地 `main` 上。
+截至本次，本地与 origin/main 一致，`scripts/` 下三个脚本已推送。
 
 ## 8. 一句总结
 
@@ -238,3 +289,9 @@ $ws   = "<仓库路径>"
 两次接手修掉的 bug 都属于「平时看起来正常、特定时段或特定面板才露馅」的类型：
 分时图那个会直接误导对金价走势的判断，茅台面板图标撞色与日期缺年份则是新功能合入时
 漏看的细节。任何改动之后，都值得在真浏览器里把三个面板的每个周期都点一遍。
+
+茅台数据现在每天 09:10 自动更新并推送。这套东西最脆的地方不是代码，而是**上游**：
+聚金数据随时可能改加密方式、换 key、或升级反爬。脚本已经把解密交给页面自己、
+失败时不破坏既有快照，但真出问题时表现为日志里连续报错、数据不更新——
+看到快照日期停住，就去翻 `.tmp\moutai-fetch.log`。
+
