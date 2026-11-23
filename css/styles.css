@@ -697,19 +697,6 @@ a {
   grid-column: 1 / -1;
 }
 
-.panel-accent--red {
-  background: linear-gradient(90deg, transparent, rgba(226, 116, 92, 0.62), transparent);
-}
-
-.asset-icon--red {
-  border-color: rgba(226, 116, 92, 0.22);
-  background: rgba(226, 116, 92, 0.06);
-}
-
-.asset-icon--red svg {
-  stroke: #e2745c;
-}
-
 .panel-accent {
   position: absolute;
   top: 0;
@@ -725,6 +712,10 @@ a {
 
 .panel-accent--blue {
   background: linear-gradient(90deg, transparent, rgba(101, 170, 255, 0.65), transparent);
+}
+
+.panel-accent--red {
+  background: linear-gradient(90deg, transparent, rgba(226, 116, 92, 0.62), transparent);
 }
 
 .asset-header {
@@ -776,6 +767,15 @@ a {
 
 .asset-icon--blue svg {
   stroke: var(--blue);
+}
+
+.asset-icon--red {
+  border-color: rgba(226, 116, 92, 0.22);
+  background: rgba(226, 116, 92, 0.06);
+}
+
+.asset-icon--red svg {
+  stroke: #e2745c;
 }
 
 .asset-title-row {
@@ -1104,12 +1104,19 @@ a {
 .chart-note {
   margin: 6px 2px 0;
   padding: 6px 9px;
-  border-left: 2px solid rgba(127, 216, 200, 0.45);
+  border-left: 2px solid var(--note-accent, rgba(127, 216, 200, 0.45));
   border-radius: 0 5px 5px 0;
-  background: rgba(127, 216, 200, 0.05);
+  background: var(--note-fill, rgba(127, 216, 200, 0.05));
   color: var(--muted);
   font-size: 11px;
   line-height: 1.5;
+}
+
+/* The Moutai panel is red-themed; a teal note there reads as another
+ * component's leftover. */
+#moutai-panel .chart-note {
+  --note-accent: rgba(226, 116, 92, 0.45);
+  --note-fill: rgba(226, 116, 92, 0.05);
 }
 
 .chart-note[hidden] {

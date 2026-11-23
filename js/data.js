@@ -712,6 +712,13 @@
     const yearStart = yearRows.length ? yearRows[0].price : first.price;
     const change = latest.price - yearStart;
     const changePct = yearStart ? (change / yearStart) * 100 : 0;
+    /* The series is a calendar-daily price feed, not a trading calendar: it
+     * carries weekend rows and skips nothing but public holidays.  Calling
+     * rows.length "trading days" elsewhere would overstate it by ~27%. */
+    const weekendRows = rows.filter((row) => {
+      const day = new Date(`${row.date}T00:00:00Z`).getUTCDay();
+      return day === 0 || day === 6;
+    }).length;
 
     return Promise.resolve({
       ok: true,
@@ -735,6 +742,7 @@
         low: Math.min(...prices),
         span: `${first.date} ~ ${latest.date}`,
         days: rows.length,
+        weekend_days: weekendRows,
       },
       points,
     });

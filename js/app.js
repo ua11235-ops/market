@@ -114,10 +114,32 @@
       .replace(/'/g, "&#039;");
   }
 
-  function formatChartDate(timestamp) {
+  /* Intraday ticks need the clock, daily bars need the year (the gold panel
+   * spans years on month K), so the label is chosen from the period rather
+   * than reusing one "MM-DD hh:mm" string for everything. */
+  const dayFormatter = new Intl.DateTimeFormat("zh-CN", {
+    timeZone: "Asia/Shanghai",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  });
+
+  const monthFormatter = new Intl.DateTimeFormat("zh-CN", {
+    timeZone: "Asia/Shanghai",
+    year: "numeric",
+    month: "2-digit",
+  });
+
+  function formatChartDate(timestamp, period) {
     if (!Number.isFinite(timestamp)) return "—";
-    const text = shortDateFormatter.format(new Date(timestamp));
-    return text.replace("/", "-").replace(" ", " ");
+    const moment = new Date(timestamp);
+    if (period === undefined || period === "intraday") {
+      return shortDateFormatter.format(moment).replace("/", "-");
+    }
+    if (period === "month" || period === "month-line") {
+      return monthFormatter.format(moment).replace("/", "-");
+    }
+    return dayFormatter.format(moment).replace(/\//g, "-");
   }
 
   function setText(element, text, flash) {
@@ -519,7 +541,9 @@
     }
     const first = shanghai.points[0];
     const last = shanghai.points[shanghai.points.length - 1];
-    const span = `${formatChartDate(first.t)} → ${formatChartDate(last.t)}`;
+    const span =
+      `${formatChartDate(first.t, payload.period)} → ` +
+      `${formatChartDate(last.t, payload.period)}`;
     if (payload.period === "intraday") {
       note.hidden = false;
       note.textContent =
@@ -571,7 +595,7 @@
   function updateMoutaiMeta(payload) {
     const updated = $("moutai-updated");
     if (updated && payload.latest) {
-      updated.textContent = `${payload.latest.span} · 共 ${payload.latest.days} 个交易日`;
+      updated.textContent = `${payload.latest.span} · 共 ${payload.latest.days} 个自然日`;
     }
     const source = $("moutai-source");
     if (source && payload.source) source.textContent = payload.source;
@@ -581,9 +605,15 @@
     const note = $("moutai-note");
     if (!note || !payload.latest) return;
     const latest = payload.latest;
+    const weekend = Number(latest.weekend_days);
+    const weekendHint =
+      Number.isFinite(weekend) && weekend > 0
+        ? `其中 ${weekend} 天为周末，故按自然日而非交易日统计。`
+        : "";
     note.hidden = false;
     note.textContent =
-      `53度 500ml 散瓶批发参考价（${latest.span}，共 ${latest.days} 个交易日），` +
+      `53度 500ml 散瓶批发参考价（${latest.span}，共 ${latest.days} 个自然日），` +
+      weekendHint +
       "数据来自聚金数据，非交易所行情；页面内置快照，不会自动更新。";
   }
 
@@ -642,7 +672,8 @@
     if (source && payload.source) source.textContent = payload.source;
     const updated = $(`${symbol}-updated`);
     if (symbol !== "moutai" && updated && payload.points.length) {
-      let text = `截至 ${formatChartDate(payload.points[payload.points.length - 1].t)}`;
+      const newest = payload.points[payload.points.length - 1].t;
+      let text = `截至 ${formatChartDate(newest, payload.period)}`;
       if (symbol === "gold" && Number.isFinite(Number(payload.fx))) {
         text += ` · 汇率 ${formatNumber(payload.fx, 4)}`;
       }
