@@ -1,7 +1,75 @@
 # 交接说明 · 金市 / 全球行情
 
-接手日期：2026-11-08
-对应提交：`fa948a4`（在 `effa6f3` 之上新增 2 个修复提交）
+接手日期：2026-11-08（第一次）／ 2026-11-23（第二次）
+对应提交：第二次接手在 `23ad33a`（茅台面板）之上新增 2 个提交
+
+---
+
+## 0. 第二次接手（2026-11-23）补充
+
+第一次交接后仓库又合入了「飞天茅台 500ml 价格面板」。本次接手主要做了三件事。
+
+### 0.1 环境结论已变化
+
+第 3.1 节记录的「`github.com:443` 不通 / 没有 node / 没有 git」在本次**不成立**：
+
+- `github.com:443` 通，`git clone https://github.com/ua11235-ops/market.git` 直接成功
+- 本机原本无 git，已下载 **PortableGit 2.56.1** 到 `.tmp/PortableGit`（免安装，随用随取）
+- node 用 DSH 自带的 `dependencies/node/bin/node.exe`（v24.21.0）
+- Chrome 可用，**headless 模式能正常渲染**，本次所有 UI 结论都来自真浏览器
+- 东方财富接口对**匿名高频请求会封 IP**：表现为 `ERR_EMPTY_RESPONSE` / `ECONNRESET`，
+  其中 `push2.eastmoney.com/api/qt/ulist.np/get` 与 `push2his.../trends2` 最先被封，
+  而 `/api/qt/stock/get` 与 `/api/qt/kline/get` 通常还活着。
+  验证时不要连续猛刷，隔十几秒一次基本安全。
+
+### 0.2 修的三个 bug
+
+**① 茅台面板图标是金色的**（与黄金面板撞色）
+
+`.asset-icon--red` 原本写在第 700 行，而基础类 `.asset-icon`（带金色边框与背景）
+在第 733 行才定义。两者优先级相同，后者胜出，于是茅台图标实际渲染成
+`rgba(233, 186, 104, …)`，和黄金面板一模一样，面板的红色主题只体现在顶部细线和徽标上。
+把红色修饰块移到基础类之后即修复，实测已变成 `rgb(226, 116, 92)`。
+
+**② 周K / 月K 的取数区间看不懂**
+
+`updateGoldNote()` 用同一个 `MM-DD hh:mm` 格式标注所有周期，于是月K 显示
+`12-30 00:00 → 11-23 00:00`——既没有年份，也分不清哪年哪月（伦敦金月K 实际跨到 2011 年）。
+改成按 `payload.period` 选格式后，月K 显示 `2011年12月 → 2026年11月`，
+日K 显示 `2025-11-20 → 2026-11-23`。页脚「截至」同样处理。
+
+**③ 茅台数据被标成「320 个交易日」**
+
+实际是**自然日**序列：320 行里有 73 行落在周末，而且周末价格会变
+（不是简单前值填充），所以不能当交易日看，按交易日理解会高估约 27% 的样本密度。
+数据层新增 `weekend_days` 字段，文案改为「320 个自然日」并注明其中周末天数。
+
+### 0.3 顺手做的工程整理
+
+- 加 `.gitattributes` 统一 `eol=lf`。原来 `index.html` 与 `js/moutai-data.js`
+  的 blob 里存的是 CRLF，在 `core.autocrlf=true` 的 Windows 上任何整文件保存
+  都会让 diff 变成「每一行都改了」。**换行符统一单独一个提交**，与逻辑改动分开，
+  否则 review 时看不出真实改动。
+- README 补上茅台面板说明（数据来源、为什么是快照、自然日 vs 交易日），
+  并新增「改代码时注意」（5 处 `?v=` 要一起递增）。
+
+### 0.4 本次怎么验证的（可复现）
+
+因为东财会封 IP，验证分两路，脚本都在 `.tmp/`：
+
+1. **离线确定性验证（主力）**：`capture-fixtures.js` / `capture-quotes.js` 把真实响应
+   落成 `.tmp/fixtures/*.json`；`cdp-probe.js` / `cdp-focus.js` 用 Chrome DevTools
+   Protocol 拦截 `push2*.eastmoney.com`，把 fixture 当作 JSONP 返回，页面拿到的
+   就是真数据格式。这条路不需要网络、可反复跑。
+   > 关键坑：`Fetch.fulfillRequest` 必须带**页面会话 id**（`Target.attachToTarget`
+   > 拿到的那个）。不带的话请求被暂停后永远不返回，页面会一直卡在「正在连接行情」，
+   > 而且没有任何报错，极易误判成「接口挂了」。
+2. **真实浏览器直连**：网络可用时直接 `chrome --headless --screenshot` 截图确认外观。
+
+已确认的行为（fixture 注入，全部通过）：20 个指数卡片与区域切换、黄金三周期 K 线
+含 MA5/10/20 与成交量、上海金叠加线、科创50 分时、茅台三周期折线
+（320 / 52 / 13 个点，与独立重算一致）、滚轮缩放（徽标 `123 / 320 根 · 双击复位`）、
+悬停十字光标与提示框、双击复位。
 
 ---
 
@@ -12,29 +80,35 @@
 - 顶部：亚洲 10 / 欧洲 5 / 美洲 5 共 20 个主要股指，按区域切换，点击卡片跳东方财富行情页
 - 左下：黄金面板，伦敦金现（COMEX 金价按 USD/CNH 折算成元/克）与上海金 Au99.99 双线叠加，显示「伦敦 − 上海」价差
 - 右下：科创 50（000688.SH）
-- 两个图表都支持 分时 / 日K / 周K / 月K，K 线含 MA5/10/20 与成交量，支持滚轮缩放、拖动平移、双击复位、悬停十字光标
+- 底部通栏：飞天茅台 500ml 散瓶批发参考价折线（数据为内置快照，非运行时抓取）
+- 三个图表都支持周期切换，支持滚轮缩放、拖动平移、双击复位、悬停十字光标
 
-数据全部由浏览器直接向东方财富的 JSONP 接口发起，项目不收集任何数据。
+除茅台快照外，数据由浏览器直接向东方财富的 JSONP 接口发起，项目不收集任何数据。
 
 ## 2. 代码结构
 
 | 文件 | 职责 | 规模 |
 | --- | --- | --- |
-| `index.html` | 页面结构，静态资源版本号（`?v=`） | 250 行 |
-| `css/styles.css` | 全部样式，暗色主题 | ~1640 行 |
-| `js/data.js` | 数据层：JSONP 抓取、序列排队、缓存、汇率折算、交易时段切分 | ~660 行 |
-| `js/chart.js` | Canvas 2D 图表引擎：K 线、分时、双序列叠加、缩放/平移/悬停 | ~1274 行 |
-| `js/app.js` | 页面控制器：渲染、刷新调度、区域/周期切换 | ~800 行 |
+| `index.html` | 页面结构，静态资源版本号（`?v=`） | 315 行 |
+| `css/styles.css` | 全部样式，暗色主题 | ~1680 行 |
+| `js/data.js` | 数据层：JSONP 抓取、序列排队、缓存、汇率折算、交易时段切分、茅台快照聚合 | ~700 行 |
+| `js/moutai-data.js` | 飞天茅台价格快照（`window.AurumMoutaiData`），不在运行时抓取 | 8 行（单行大 JSON） |
+| `js/chart.js` | Canvas 2D 图表引擎：K 线、分时、折线、双序列叠加、缩放/平移/悬停 | ~1300 行 |
+| `js/app.js` | 页面控制器：渲染、刷新调度、区域/周期切换 | ~925 行 |
 
-三者通过全局 `AurumData` / `MarketChart` 衔接，没有模块系统，`<script>` 顺序加载。
+各文件通过全局 `AurumData` / `AurumMoutaiData` / `MarketChart` 衔接，没有模块系统，
+`<script>` 顺序加载（`moutai-data.js` 必须在 `data.js` 之前）。
 
 关键接口：`push2.eastmoney.com/api/qt/{stock,ulist.np}/get`（报价）、
 `push2his.eastmoney.com/api/qt/{stock/trends2,stock/kline}/get`（分时/K线）。
 所有请求经 `js/data.js` 里的**串行队列**（`enqueue` + 120ms 间隔）发出——东方财富对并发请求会直接掐连接，这是踩过坑的设计，不要改成并行。
 
-## 3. 本次接手做了什么
+## 3. 第一次接手做了什么（2026-11-08）
 
-### 3.1 环境限制（重要）
+### 3.1 环境限制（当时的情况）
+
+> 第二次接手复核：以下结论已过期，`github.com:443` 现在是通的，见 0.1。
+> 保留此段是为了说明当时为什么用了镜像方案。
 
 这台机器 **`github.com:443` 不通**（TCP 连 20.205.243.166 超时），
 但 `api.github.com`、`raw.githubusercontent.com`、`codeload.github.com` 和
@@ -46,10 +120,6 @@
    并且建议加 `-c http.version=HTTP/1.1`，HTTP/2 下会被 RST）
 - 本机**没有 `gh`、没有 node/python 的全局安装、没有 SSH key**，
   GitHub 也是匿名访问，API 限流 60 次/小时（本次已用尽并触发 403）
-
-工作区已恢复为正常的 git 仓库（含完整 38 个历史提交），`origin` 指向
-`https://github.com/ua11235-ops/market.git`。**推送同样需要走网络方案**，
-详见第 6 节。
 
 ### 3.2 修掉的两个真 bug
 
@@ -80,66 +150,83 @@ README 的目录结构删掉了并不存在的 `_desktop/`。
 
 ### 3.3 未做、但值得知道
 
-- **没有真实浏览器验证**：本沙箱禁止 Chrome/Edge 启动（mojo 命名管道被拒，
-  `platform_channel.cc:187 Check failed`），所以改用 Node + 自建 DOM/Canvas
-  桩把 `data.js`/`chart.js`/`app.js` 原样跑起来做断言。像素级外观（字体、
-  颜色、布局）本次**没有**目视确认过，接手后建议在真机浏览器里过一眼。
+> 第二次接手复核：headless Chrome 在本机是能跑的，本次 UI 结论都来自真浏览器，
+> 下面「没有真实浏览器验证」的顾虑已消除。
+
 - **季度/年度 K 线未提供**：`PERIOD_KLT` 只有 101/102/103（日/周/月）。
 - **月 K 数据量偏少**：科创 50 月 K 只有 84 根（2019-12 起），属正常（指数 2019 年发布）。
 - **伦敦金折算用固定 31.1034768 克/盎司**，未考虑品种合约规格差异。
 
-## 4. 验证方法（可复现）
+## 4. 仍然存在的问题（未修，留给下一位）
+
+- **茅台快照会过期**：面板写死「历史数据」，不会自动更新。当前快照止于 2026-11-22，
+  而聚金数据当天已更新到 2026-11-23（同样是 1720）。要更新需重新抓取并替换 `daily` 数组。
+- **茅台折线 tooltip 的涨跌口径**：`prev_close` 被塞成了 `year_start`，所以折线模式下
+  悬停显示的是「相对年初」的涨跌，而不是「相对上一根」。数字自洽，但与 K 线面板习惯不同；
+  若要统一，得单独改 `chart.js` 的 `updateTooltip()`。
+- **茅台 2026-09-08 有个单日尖峰**（1785 → 1885 → 1780），一天来回 100 元，
+  像数据源的异常点，但没有第二来源可交叉验证，暂未剔除。
+- **`?v=` 版本号靠手工维护**，容易漏改；若以后频繁改动，值得加一个构建期校验脚本。
+
+## 5. 验证方法（可复现）
 
 验证脚本都在 `.tmp/`（已在 `.gitignore` 里，不会提交）。用 DSH 自带的 node 跑：
 
 ```powershell
-$node = "C:\Users\ua11235\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\node\bin\node.exe"
+$node = "C:\Users\admin\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\node\bin\node.exe"
 $ws   = "<仓库路径>"
 
-& $node "$ws\.tmp\verify-data.js"  $ws   # 数据层：14 项，打真实接口
-& $node "$ws\.tmp\smoke.js"        $ws   # UI 层：19 项，跑完整前端逻辑
-& $node "$ws\.tmp\check-assets.js" $ws   # 资源层：编码/BOM/版本号/路径
+# 离线确定性验证（推荐，不需要网络）
+& $node "$ws\..\.tmp\serve.js"   $ws 8899          # 静态服务器，另开一个窗口
+& $node "$ws\..\.tmp\cdp-probe.js"  $ws "$env:TEMP\shot.png"
+& $node "$ws\..\.tmp\cdp-focus.js"
+
+# 网络可用时，打真实接口
+& $node "$ws\..\.tmp\verify-data.js" $ws
 ```
 
-三套当前均为全绿（14/14、19/19、19/19）。
+第一轮接手的 `verify-data.js` / `smoke.js` / `check-assets.js` 已随旧 `.tmp/` 目录丢失，
+本次重写了 `verify-data.js`（数据层 17 项）与基于 CDP 的 UI 验证，思路与原脚本一致。
 
 - `verify-data.js` — 校验汇率、20 个指数无缺失、金价折算、价差算术、
-  8 个「品种×周期」组合的点数/时序/OHLC 合法性/MA 计算
-- `smoke.js` — 解析真实 `index.html`，在 DOM 桩里执行三个 JS，
-  断言价格渲染、卡片数量、Canvas 实际绘制、区域切换、周期切换、图例
-- `check-assets.js` — 防 mojibake／BOM／版本号忘记递增／引用文件缺失
+  各「品种×周期」组合的点数/时序/OHLC 合法性/MA 计算、茅台分桶与年初至今算术
+- `cdp-probe.js` — 真 Chrome 里加载页面、注入 fixture，断言卡片数、价格、
+  三周期切换、Canvas 实际像素、缩放徽标、悬停提示、双击复位、各处配色
+- `cdp-focus.js` — 专项校验：茅台分桶点数与独立重算一致、注释配色、跨年区间标注
 
 > 编码坑：用 PowerShell 的 `Set-Content -Encoding UTF8` 改中文文件会写入 BOM，
-> 用 `-replace` 按 ANSI 读还会把中文变成乱码。**改含中文的文件请用 Node 脚本**
-> （本次就是这么做的）。`check-assets.js` 就是为此加的护栏。
+> 用 `-replace` 按 ANSI 读还会把中文变成乱码。**改含中文的文件请用 write 工具或 Node 脚本**。
 
-## 5. 日常维护要点
+## 6. 日常维护要点
 
-- 改任何 `js/*.js` 或 `css/*.css` 后，把 `index.html` 里 4 处 `?v=` 一起递增
-- 新增指数：编辑 `js/data.js` 的 `REGIONS`，填 `secid`（`市场.代码`，
-  如 `100.HSI`）与 `url`
+- 改任何 `js/*.js` 或 `css/*.css` 后，把 `index.html` 里 **5 处** `?v=` 一起递增
+  （茅台面板加进来后多了 `moutai-data.js` 一个引用）
+- 新增指数：编辑 `js/data.js` 的 `REGIONS`，填 `secid`（`市场.代码`，如 `100.HSI`）与 `url`
 - 新增品种分时：在 `SESSION_OPEN_HOUR` 补该 `secid` 的开盘小时（北京时间），
   否则会回退到"最后一个自然日"
+- 新增折线类面板（像茅台）：在 payload 里给 `line: true` 与 `precision`，
+  `chart.js` 会自动走 `drawIntraday` 画折线而不是蜡烛
+- **新增 CSS 修饰类要放在基础类之后**：本次茅台图标撞色就是层叠顺序问题，
+  改样式后建议用真浏览器读一次 `getComputedStyle` 确认生效
 - 接口挂了的表现：连接状态变成「连接中断」，页面有 toast 提示，不会静默空图；
   连续失败 2 次内会自动重试
-- 东方财富限流：保持串行队列，不要加并发；`QUOTE_BATCH = 30` 是批量报价上限
+- 东方财富限流：保持串行队列，不要加并发；`QUOTE_BATCH = 30` 是批量报价上限。
+  **手动验证时更要注意**，短时间多次请求会被封 IP，冷却十几分钟后恢复
+- 换行符：仓库已用 `.gitattributes` 统一 LF，别按 CRLF 整文件重写
 
-## 6. 后续怎么推送
+## 7. 后续怎么推送
 
-`git push` 需要 github.com:443，本机不通。可选方案：
+> 第二次接手复核：`github.com:443` 现在是通的，直连 `git push` 即可。
+> 本机已无 GitHub 凭据（无 PAT、无 SSH key），推送前仍需先配凭据。
 
-1. **换网络环境**（最省事）：能直连 github.com 的机器上 `git push`
-2. **走镜像推送**：`git push https://ghproxy.net/https://github.com/ua11235-ops/market.git main`
-   （ghproxy 支持 push，但需带凭据；匿名不可推）
-3. **配置凭据**：当前机器没有任何 GitHub 凭据（`cmdkey` 无 github 条目、
-   无 SSH key、无 `GH_TOKEN`），推送前需要先配 PAT 或 SSH key
-
-本次**未推送**，两个修复提交只在本地 `main` 上。仓库部署走
-`.github/workflows/jekyll-gh-pages.yml`（推 main 自动发布到 GitHub Pages），
+仓库部署走 `.github/workflows/jekyll-gh-pages.yml`（推 main 自动发布到 GitHub Pages），
 所以推上去即自动生效，无需手动构建。
 
-## 7. 一句总结
+本次**未推送**，2 个提交只在本地 `main` 上。
 
-项目本身干净、结构清晰，问题集中在**数据边界情况**而非架构。
-本次修掉的两个 bug 都属于"平时看起来正常、特定时段才露馅"的类型，
-其中分时图那个会直接误导对金价走势的判断，建议优先在真机确认效果后再发布。
+## 8. 一句总结
+
+项目本身干净、结构清晰，问题集中在**数据边界情况**与**CSS 层叠顺序**，而不是架构。
+两次接手修掉的 bug 都属于「平时看起来正常、特定时段或特定面板才露馅」的类型：
+分时图那个会直接误导对金价走势的判断，茅台面板图标撞色与日期缺年份则是新功能合入时
+漏看的细节。任何改动之后，都值得在真浏览器里把三个面板的每个周期都点一遍。
