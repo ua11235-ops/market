@@ -38,22 +38,31 @@ if (-not $NodePath) {
   throw '找不到 node.exe，请用 -NodePath 指定'
 }
 
-$script = Join-Path $PSScriptRoot 'fetch-moutai.js'
+$script = Join-Path $PSScriptRoot 'run-daily.ps1'
 if (-not (Test-Path $script)) { throw "找不到 $script" }
 
 Write-Host "仓库：$repoRoot"
 Write-Host "node：$NodePath"
-Write-Host "脚本：$script"
+Write-Host "任务：$script"
+if (-not $env:AURUM_GIT_TOKEN) {
+  Write-Host "注意：没设置 AURUM_GIT_TOKEN，任务只会提交到本地、不会推送" -ForegroundColor Yellow
+}
 
-# 包一层 cmd，顺便把输出记到日志，方便排查
 $logDir = Join-Path $repoRoot '.tmp'
 New-Item -ItemType Directory -Force -Path $logDir | Out-Null
 $logFile = Join-Path $logDir 'moutai-fetch.log'
+
+# 包一层 cmd：把 node 路径和 token 传进环境变量后再调 PowerShell。
+# node 路径要设成用户级环境变量，否则计划任务里子进程拿不到。
+[Environment]::SetEnvironmentVariable('AURUM_NODE', $NodePath, 'User')
+Write-Host "已设置用户环境变量 AURUM_NODE=$NodePath"
+
 $wrapper = Join-Path $logDir 'run-fetch-moutai.cmd'
-$cmdLine = '@echo off' + "`r`n" +
-           "echo. >> `"$logFile`"`r`n" +
-           "echo ==== %DATE% %TIME% ==== >> `"$logFile`"`r`n" +
-           "`"$NodePath`" `"$script`" `"$repoRoot`" >> `"$logFile`" 2>&1`r`n"
+$cmdLine = @(
+  '@echo off',
+  'rem 由 scripts\install-task.ps1 生成，供计划任务调用',
+  'powershell -NoProfile -ExecutionPolicy Bypass -File "' + $script + '"'
+) -join "`r`n"
 Set-Content -Path $wrapper -Value $cmdLine -Encoding ASCII
 
 $action = New-ScheduledTaskAction -Execute $wrapper
@@ -62,17 +71,16 @@ $settings = New-ScheduledTaskSettingsSet `
   -AllowStartIfOnBatteries `
   -DontStopIfGoingOnBatteries `
   -StartWhenAvailable `
-  -ExecutionTimeLimit (New-TimeSpan -Minutes 15)
+  -ExecutionTimeLimit (New-TimeSpan -Minutes 20)
 
 Register-ScheduledTask `
   -TaskName $TaskName `
   -Action $action `
   -Trigger $trigger `
   -Settings $settings `
-  -Description '每天抓取飞天茅台 500ml 散瓶批价到本仓库 js/moutai-data.js' `
+  -Description '每天抓取飞天茅台 500ml 散瓶批价，有变化则提交并推送' `
   -Force | Out-Null
 
 Write-Host ""
-Write-Host "已注册计划任务 $TaskName，每天 $Time 执行"
+Write-Host "已注册计划任务 $TaskName，每天 $Time 执行" -ForegroundColor Green
 Write-Host "日志：$logFile"
-Write-Host "手动试跑：$wrapper"

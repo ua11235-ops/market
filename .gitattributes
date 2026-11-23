@@ -13,3 +13,7 @@
 *.woff binary
 *.woff2 binary
 *.ttf binary
+
+# PowerShell scripts keep CRLF: Windows PowerShell 5.1 needs the UTF-8 BOM to
+# read the Chinese comments correctly, and the BOM pairs with CRLF here.
+*.ps1 text eol=crlf
