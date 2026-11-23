@@ -533,10 +533,26 @@
   function updateGoldNote(payload) {
     const note = $("gold-note");
     if (!note) return;
+
+    /* Say which rate was used.  Gold candles are converted with the USD/CNH
+     * that was actually in force on each bar, so a 2011 bar is not priced
+     * with today's rate; the fallback happens only when the FX feed is down. */
+    const fxNote =
+      payload.fx_mode === "historical"
+        ? "伦敦金现按各期 USD/CNH 折算。"
+        : payload.fx_mode === "flat-fallback"
+          ? "汇率序列取不到，已退回按当前汇率统一折算，历史段可能有偏差。"
+          : "";
+
     const shanghai = payload.shanghai;
     const hasShanghai = shanghai && Array.isArray(shanghai.points) && shanghai.points.length > 1;
     if (!hasShanghai) {
-      note.hidden = true;
+      if (fxNote) {
+        note.hidden = false;
+        note.textContent = fxNote;
+      } else {
+        note.hidden = true;
+      }
       return;
     }
     const first = shanghai.points[0];
@@ -552,7 +568,7 @@
       return;
     }
     note.hidden = false;
-    note.textContent = `上海金 Au99.99 同期区间 ${span}，与伦敦金现按日期对齐后叠加。`;
+    note.textContent = `上海金 Au99.99 同期区间 ${span}，与伦敦金现按日期对齐后叠加。${fxNote}`;
   }
 
   function updateMoutaiHeader(payload) {
@@ -675,7 +691,15 @@
       const newest = payload.points[payload.points.length - 1].t;
       let text = `截至 ${formatChartDate(newest, payload.period)}`;
       if (symbol === "gold" && Number.isFinite(Number(payload.fx))) {
-        text += ` · 汇率 ${formatNumber(payload.fx, 4)}`;
+        /* Only show a single rate when a single rate was actually used.
+         * On candles each bar carries its own historical rate, so quoting
+         * today's number here would misdescribe the conversion. */
+        text +=
+          payload.fx_mode === "flat-fallback"
+            ? ` · 汇率 ${formatNumber(payload.fx, 4)}（统一折算）`
+            : payload.fx_mode === "live"
+              ? ` · 汇率 ${formatNumber(payload.fx, 4)}`
+              : " · 各期汇率折算";
       }
       updated.textContent = text;
     }

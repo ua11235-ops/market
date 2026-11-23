@@ -540,35 +540,82 @@
     );
   }
 
+  /* ---- historical USD/CNH for candle conversion ---------------------------
+   * Converting a 2011 gold bar with today's rate is wrong: USD/CNH was 6.34
+   * then and is ~6.66 now, and measured against the real series the error
+   * reaches 10.4% at the extremes (and flips sign around 2019, where the
+   * rate was above today's).  So candles are converted with the rate that
+   * was actually in force on that bar, and only intraday keeps a single
+   * current rate -- a session lasts hours, not years. */
+
+  function fetchFxHistory(period) {
+    const klt = PERIOD_KLT[period] || 101;
+    /* Enough bars to cover the matching gold range, which starts further
+     * back (gold month reaches 2011-12, FX month reaches 2010-08). */
+    const limit = period === "month" ? 220 : period === "week" ? 300 : 420;
+    const url =
+      `${HISTORY_HOST}/stock/kline/get?secid=${FX_SECID}&klt=${klt}&fqt=1` +
+      `&lmt=${limit}&end=20500101&${CANDLE_FIELDS}`;
+    return jsonp(url).then((payload) => {
+      const data = payload && payload.data;
+      const rows = (data && data.klines) || [];
+      const points = [];
+      rows.forEach((line) => {
+        const fields = String(line).split(",");
+        if (fields.length < 3) return;
+        const moment = new Date(`${fields[0].slice(0, 10)}T00:00:00+08:00`);
+        const close = Number(fields[2]);
+        if (Number.isNaN(moment.getTime())) return;
+        if (!Number.isFinite(close) || close <= 0) return;
+        points.push({ t: moment.getTime(), c: close });
+      });
+      points.sort((a, b) => a.t - b.t);
+      if (!points.length) throw new Error("暂无汇率数据");
+      return points;
+    });
+  }
+
+  function ymd(timestamp) {
+    return new Date(timestamp + 8 * 3600 * 1000).toISOString().slice(0, 10);
+  }
+
+  /* Month bars do not share a timestamp between the two feeds (gold closes
+   * 2011-12-30, FX 2011-12-31), so months are matched by YYYY-MM.  Day and
+   * week bars match by date, falling back to the newest rate at or before
+   * the bar so a holiday gap never leaves a bar unconverted. */
+  function makeFxResolver(fxPoints, period) {
+    if (period === "month") {
+      const byMonth = new Map();
+      fxPoints.forEach((point) => byMonth.set(ymd(point.t).slice(0, 7), point.c));
+      return (timestamp) => byMonth.get(ymd(timestamp).slice(0, 7)) || null;
+    }
+    const byDate = new Map();
+    fxPoints.forEach((point) => byDate.set(ymd(point.t), point.c));
+    return (timestamp) => {
+      const exact = byDate.get(ymd(timestamp));
+      if (exact) return exact;
+      let low = 0;
+      let high = fxPoints.length - 1;
+      let best = null;
+      while (low <= high) {
+        const mid = (low + high) >> 1;
+        if (fxPoints[mid].t <= timestamp) {
+          best = fxPoints[mid].c;
+          low = mid + 1;
+        } else {
+          high = mid - 1;
+        }
+      }
+      return best;
+    };
+  }
+
   // ----------------------------------------------------------------- charts
 
   function buildGoldChart(period) {
-    return fetchUsdCny().then((fx) => {
-      const factor = fx / TROY_OUNCE_GRAMS;
-      const primary =
-        period === "intraday"
-          ? fetchTrends(GOLD_SECID, 2).then((series) => ({
-              prev_close:
-                series.prev_close === null ? null : round(series.prev_close * factor, 3),
-              points: series.points.map((point) => ({
-                ...point,
-                o: round(point.o * factor, 3),
-                h: round(point.h * factor, 3),
-                l: round(point.l * factor, 3),
-                c: round(point.c * factor, 3),
-                avg: point.avg === null ? null : round(point.avg * factor, 3),
-              })),
-            }))
-          : fetchCandles(GOLD_SECID, period).then((points) => ({
-              prev_close: null,
-              points: points.map((point) => ({
-                ...point,
-                o: round(point.o * factor, 3),
-                h: round(point.h * factor, 3),
-                l: round(point.l * factor, 3),
-                c: round(point.c * factor, 3),
-              })),
-            }));
+    return fetchUsdCny().then((liveFx) => {
+      const flatFactor = liveFx / TROY_OUNCE_GRAMS;
+      const convert = (value, factor) => round(value * factor, 3);
 
       const overlay =
         period === "intraday"
@@ -578,51 +625,101 @@
               points,
             }));
 
-      return Promise.all([primary, overlay.catch(() => null)]).then(([main, shanghai]) => {
-        const points =
-          period === "intraday" ? main.points : withMovingAverages(main.points);
-        const chart = {
-          ok: true,
-          stale: false,
-          symbol: "gold",
-          period,
-          precision: 2,
-          source: "东方财富 · 伦敦金现（折算）",
-          as_of: new Date().toISOString(),
-          currency: "CNY",
-          unit: "CNY/g",
-          unit_label: "元/克",
-          fx: round(fx, 4),
-          prev_close: main.prev_close,
-          points,
-        };
-        if (shanghai && shanghai.points && shanghai.points.length > 1) {
-          let overlayPoints = shanghai.points;
-          if (period !== "intraday" && points.length) {
-            const start = points[0].t;
-            const end = points[points.length - 1].t + 86400000;
-            overlayPoints = overlayPoints.filter(
-              (point) => point.t >= start && point.t <= end
-            );
-          }
-          chart.shanghai = {
-            symbol: "Au99.99",
-            name: "上海金 Au99.99",
-            unit_label: "元/克",
-            prev_close: shanghai.prev_close,
-            points: overlayPoints,
-          };
-          if (overlayPoints.length && points.length) {
-            const latestShanghai = overlayPoints[overlayPoints.length - 1].c;
-            const latestLondon = points[points.length - 1].c;
-            const premium = latestLondon - latestShanghai;
-            chart.premium = round(premium, 2);
-            chart.premium_pct = round((premium / latestShanghai) * 100, 2);
-          }
-        }
-        return chart;
+      if (period === "intraday") {
+        const primary = fetchTrends(GOLD_SECID, 2).then((series) => ({
+          prev_close:
+            series.prev_close === null ? null : convert(series.prev_close, flatFactor),
+          points: series.points.map((point) => ({
+            ...point,
+            o: convert(point.o, flatFactor),
+            h: convert(point.h, flatFactor),
+            l: convert(point.l, flatFactor),
+            c: convert(point.c, flatFactor),
+            avg: point.avg === null ? null : convert(point.avg, flatFactor),
+          })),
+        }));
+        return Promise.all([primary, overlay.catch(() => null)]).then(([main, shanghai]) =>
+          assembleGoldChart(period, main, shanghai, {
+            fx: liveFx,
+            fxMode: "live",
+          })
+        );
+      }
+
+      /* Candles need the rate series; if it is unavailable the chart still
+       * renders with the current rate, but says so instead of pretending. */
+      const fxHistory = fetchFxHistory(period).catch(() => null);
+      return fxHistory.then((history) => {
+        const resolver = history && history.length > 1 ? makeFxResolver(history, period) : null;
+        const fxMode = resolver ? "historical" : "flat-fallback";
+        const primary = fetchCandles(GOLD_SECID, period).then((points) => ({
+          prev_close: null,
+          points: points.map((point) => {
+            const rate = (resolver && resolver(point.t)) || liveFx;
+            const factor = rate / TROY_OUNCE_GRAMS;
+            return {
+              ...point,
+              o: convert(point.o, factor),
+              h: convert(point.h, factor),
+              l: convert(point.l, factor),
+              c: convert(point.c, factor),
+            };
+          }),
+        }));
+        return Promise.all([primary, overlay.catch(() => null)]).then(([main, shanghai]) =>
+          assembleGoldChart(period, main, shanghai, {
+            fx: liveFx,
+            fxMode,
+          })
+        );
       });
     });
+  }
+
+  function assembleGoldChart(period, main, shanghai, meta) {
+    const points =
+      period === "intraday" ? main.points : withMovingAverages(main.points);
+    const chart = {
+      ok: true,
+      stale: false,
+      symbol: "gold",
+      period,
+      precision: 2,
+      source: "东方财富 · 伦敦金现（折算）",
+      as_of: new Date().toISOString(),
+      currency: "CNY",
+      unit: "CNY/g",
+      unit_label: "元/克",
+      fx: round(meta.fx, 4),
+      fx_mode: meta.fxMode,
+      prev_close: main.prev_close,
+      points,
+    };
+    if (shanghai && shanghai.points && shanghai.points.length > 1) {
+      let overlayPoints = shanghai.points;
+      if (period !== "intraday" && points.length) {
+        const start = points[0].t;
+        const end = points[points.length - 1].t + 86400000;
+        overlayPoints = overlayPoints.filter(
+          (point) => point.t >= start && point.t <= end
+        );
+      }
+      chart.shanghai = {
+        symbol: "Au99.99",
+        name: "上海金 Au99.99",
+        unit_label: "元/克",
+        prev_close: shanghai.prev_close,
+        points: overlayPoints,
+      };
+      if (overlayPoints.length && points.length) {
+        const latestShanghai = overlayPoints[overlayPoints.length - 1].c;
+        const latestLondon = points[points.length - 1].c;
+        const premium = latestLondon - latestShanghai;
+        chart.premium = round(premium, 2);
+        chart.premium_pct = round((premium / latestShanghai) * 100, 2);
+      }
+    }
+    return chart;
   }
 
   function buildStarChart(period) {
