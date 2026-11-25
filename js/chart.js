@@ -164,7 +164,7 @@
       return this.data && Array.isArray(this.data.points) ? this.data.points.length : 0;
     }
 
-    /* Decimal places the price tags use; Moutai is quoted in whole yuan. */
+    /* Decimal places the price tags use; payloads may ask for whole units. */
     priceDigits() {
       return this.data && Number.isFinite(this.data.precision) ? this.data.precision : 2;
     }
@@ -675,8 +675,7 @@
       } else if (period === "intraday") {
         this.drawIntraday(ctx, points, xFor, yFor, plot, visibleStart, visibleEnd);
       } else if (this.isLineMode()) {
-        // Price series such as Moutai's wholesale reference are shown as a
-        // plain line rather than candles.
+        // Price series that ask for a plain line rather than candles.
         this.drawIntraday(ctx, points, xFor, yFor, plot, visibleStart, visibleEnd);
       } else {
         this.drawCandles(ctx, points, xFor, yFor, plot, visibleStart, visibleEnd);

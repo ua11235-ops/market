@@ -692,11 +692,6 @@ a {
   --panel-aura: rgba(70, 137, 220, 0.055);
 }
 
-#moutai-panel {
-  --panel-aura: rgba(214, 148, 92, 0.05);
-  grid-column: 1 / -1;
-}
-
 .panel-accent {
   position: absolute;
   top: 0;
@@ -712,10 +707,6 @@ a {
 
 .panel-accent--blue {
   background: linear-gradient(90deg, transparent, rgba(101, 170, 255, 0.65), transparent);
-}
-
-.panel-accent--red {
-  background: linear-gradient(90deg, transparent, rgba(226, 116, 92, 0.62), transparent);
 }
 
 .asset-header {
@@ -767,15 +758,6 @@ a {
 
 .asset-icon--blue svg {
   stroke: var(--blue);
-}
-
-.asset-icon--red {
-  border-color: rgba(226, 116, 92, 0.22);
-  background: rgba(226, 116, 92, 0.06);
-}
-
-.asset-icon--red svg {
-  stroke: #e2745c;
 }
 
 .asset-title-row {
@@ -1095,7 +1077,6 @@ a {
 .legend-ma10 { --legend-color: #5b9dff; }
 .legend-ma20 { --legend-color: #b98cff; }
 .legend-london { --legend-color: #e9ba68; }
-.legend-price { --legend-color: #e2745c; }
 .legend-sge { --legend-color: #7fd8c8; }
 .legend-sge i { background: repeating-linear-gradient(90deg, var(--legend-color) 0 3px, transparent 3px 5px); }
 .legend-avg { --legend-color: #91a4b9; }
@@ -1110,13 +1091,6 @@ a {
   color: var(--muted);
   font-size: 11px;
   line-height: 1.5;
-}
-
-/* The Moutai panel is red-themed; a teal note there reads as another
- * component's leftover. */
-#moutai-panel .chart-note {
-  --note-accent: rgba(226, 116, 92, 0.45);
-  --note-fill: rgba(226, 116, 92, 0.05);
 }
 
 .chart-note[hidden] {
@@ -1378,10 +1352,6 @@ a {
 
 .source-badge--blue i {
   background: var(--blue);
-}
-
-.source-badge--red i {
-  background: #e2745c;
 }
 
 .footer-divider {

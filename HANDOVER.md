@@ -296,7 +296,145 @@ $ws   = "<仓库路径>"
 
 截至本次，本地与 origin/main 一致，`scripts/` 下三个脚本已推送。
 
-## 8. 一句总结
+## 8. 第三次接手（2026-11-24）
+
+本次接手**没有改动任何代码或数据**，只改了这份 HANDOVER（新增本节，
+并把旧的第 8 节顺延为第 9 节）。页面、脚本、快照三者都未触碰，
+`js/` `css/` `scripts/` 与 `HEAD = 59324dc` 逐字节一致。
+结论：项目本身健康，自动化链路正常，但交接文档里有三处会误导人的地方，已就地更正。
+
+### 8.1 自动化链路状态（实测）
+
+- 计划任务 `AurumFetchMoutai`：`LastTaskResult = 0`，下次 2026-11-25 09:10
+- 2026-11-24 09:10 那次抓到了 2026-11-24 的新价格，提交 `59324dc` 并
+  **成功推送到 origin/main**，五处 `?v=` 同步 16 → 17
+- 三个环境变量在**用户作用域**里都齐（`AURUM_GIT_TOKEN` 长度 93）。
+  注意：DSH 的工作进程读不到用户作用域变量，要按作用域查：
+  `[Environment]::GetEnvironmentVariable('AURUM_GIT_TOKEN','User')`。
+  按进程作用域查会误判成"未设置"。
+- 日志是 GBK 编码，用 UTF-8 读会整片乱码，不是脚本坏了：
+  `Get-Content .tmp\moutai-fetch.log -Encoding Default`
+
+### 8.2 更正：验证脚本的位置
+
+第 5 节写的 `$ws\..\.tmp\` 是对的，但很容易被读成"仓库里的 `.tmp`"。
+两处 `.tmp` 不是同一个：
+
+| 路径 | 内容 | 是否入库 |
+| --- | --- | --- |
+| `D:\develop\.tmp\` | 验证脚本、fixtures、PortableGit | 否（在工作区根，不在仓库内） |
+| `D:\develop\market\.tmp\` | 抓取日志、moutai-raw、run-fetch-moutai.cmd | 否（被 `.gitignore` 忽略） |
+
+### 8.3 更正：`verify-data.js` 的"接口不可用"十有八九不是被封 IP
+
+本次跑 `verify-data.js` 得到 11 项 `FAIL ... <- 行情接口不可用`，
+但同一时刻真 Chrome 打开页面，行情、K 线、分时全部正常显示。
+根因是**脚本 shim 的 bug，与网络无关**：
+
+`js/data.js` 的 `jsonpOnce()` 自己会往 URL 上拼 `cb=__aurum_cb_<ts>_<n>`，
+而东财只回显**第一个** `cb`。脚本又追加了一个自己的 `cb=__node_cb_*`，
+于是响应里带的是页面的回调名、不是脚本的，正则匹配失败 → 走 `script.onerror`
+→ 被翻译成"行情接口不可用"。**这个错误文案会让人以为 IP 被封，实际不是。**
+
+已在 `D:\develop\.tmp\verify-data.js` 修好（改成用 `searchParams.set` 替换而非追加）。
+所以：**看到"行情接口不可用"先怀疑脚本，不要先怀疑 IP**；
+真被封的表现是 `ERR_EMPTY_RESPONSE` / `ECONNRESET`（见 0.1）。
+
+### 8.4 新增：完全离线的验证脚本（推荐日常用）
+
+`D:\develop\.tmp\offline-e2e.js` —— 不发起任何外部请求，用已抓好的
+`fixtures/` 回放给 `js/data.js`，校验汇率、逐期汇率折算、各品种各周期
+OHLC 合法性与时序、茅台分桶。当前 **13/13 全通过**。
+
+```powershell
+$node = "C:\Users\admin\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\node\bin\node.exe"
+& $node 'D:\develop\.tmp\offline-e2e.js' 'D:\develop\market'
+```
+
+其中"伦敦金首根 = 319.189 元/克"与 4.1 节独立复核值一致，可作为折算逻辑的回归基线。
+连东财会被封 IP，**日常验证请优先用这个离线脚本**。
+
+### 8.5 写这类脚本时踩到的字段契约
+
+`js/data.js` 对外只导出 `REGIONS / getDashboard / getChart / fetchUsdCny /
+invalidate / TROY_OUNCE_GRAMS / MOUTAI_PERIODS`，**没有 `fetchGoldChart`**
+（那是内部函数），取图一律走 `getChart(symbol, period)`，`symbol` 是
+`gold` / `star50` / `moutai`。
+
+点位字段是短名 **`t/o/h/l/c/v`**（外加 `ma5/ma10/ma20`），不是
+`open/high/low/close`。另有一个坑：K 线的周期是 `day/week/month`，
+而茅台折线的周期是 `daily-line/week-line/month-line`，
+**传错不会报错，会静默回退成月线**，看起来像"茅台只有 13 个点"。
+
+---
+
+## 9. 第四次接手（2026-11-25）：茅台面板已移除
+
+**本节之后，本文件前面关于茅台的描述全部只作历史记录，不再对应当前代码。**
+
+### 9.1 为什么移除
+
+用户发现这台电脑每天 09:10 会启动一个计划任务去抓茅台批价，要求去掉；
+随后要求把茅台价格面板整块从页面移除。所以现在：
+
+- 计划任务 `AurumFetchMoutai` 已删除（`schtasks /query` 已找不到）
+- `AURUM_NODE` / `AURUM_GIT` / `AURUM_GIT_TOKEN` 三个用户级环境变量已清除
+- 2026-11-25 09:10 那次抓取产生的本地提交 `afda3ea` 已撤销，
+  `js/moutai-data.js` 与 `index.html` 回到 `59324dc` 的状态，
+  HEAD 与 `origin/main` 都是 `59324dc`
+- 页面、样式、数据层里的茅台代码与 `js/moutai-data.js`、
+  `scripts/` 下三个抓取脚本全部删除
+
+### 9.2 具体删了什么
+
+| 位置 | 删掉的东西 |
+| --- | --- |
+| `index.html` | `#moutai-panel` 整块（64 行）、`js/moutai-data.js` 引用 1 行 |
+| `js/app.js` | `state.charts.moutai`、`moutaiNumber()`、`updateMoutaiHeader/Meta/Note()`、`setupCharts` 里的实例、`init` 里的预加载、legend/state/toast 里的茅台分支 |
+| `js/data.js` | `MOUTAI_PERIODS`、`moutaiPayload()`、`moutaiBucketed()`、`buildMoutaiChart()`，以及 `getChart` 的茅台分支和导出 |
+| `js/chart.js` | 仅删两句提到茅台的行内注释（折线绘制能力保留，未删） |
+| `css/styles.css` | `#moutai-panel`、`.panel-accent--red`、`.asset-icon--red`、`.legend-price`、`.source-badge--red`、`#moutai-panel .chart-note` |
+| 删除文件 | `js/moutai-data.js`、`scripts/fetch-moutai.js`、`scripts/run-daily.ps1`、`scripts/install-task.ps1`（`scripts/` 目录已空） |
+| `README.md` | 茅台功能条目、数据来源行、「茅台数据说明」整节、结构表三行 |
+
+`chart.js` 的折线模式（`line: true` / `precision` / `daily-line` 等周期名）
+**是有意保留的**：它是通用能力，将来加别的折线品种不用重写。
+
+### 9.3 `?v=` 现在是 4 处，不是 5 处
+
+`moutai-data.js` 的引用删掉后，`index.html` 只剩
+`styles.css` / `data.js` / `chart.js` / `app.js` 四个版本号，
+本次统一从 17 递增到 **18**。前面各节写的「5 处」请按 4 处理解。
+
+### 9.4 这次踩到的坑（重要）
+
+**用 Windows PowerShell 5.1 改含中文的 JS/CSS 会把文件彻底毁掉。**
+`Get-Content` 默认按 GBK 读 UTF-8 文件，中文变成乱码，
+再 `Set-Content -Encoding UTF8` 写回还会加 BOM。本次 `js/app.js`
+一度被写成 0 可用内容（长度从 34826 掉到 32630 且中文全丢），
+是靠 `git checkout -- js/app.js` 才恢复的。
+
+HANDOVER 第 5 节早就写了这条，但这次仍然踩了。**结论：改仓库里的文本文件
+一律用 write/edit 工具或 Node 脚本（`fs.readFileSync(f, "utf8")`），
+不要用 PowerShell 的 `Get-Content`/`Set-Content` 组合。**
+
+### 9.5 怎么验证的（不碰东财）
+
+新增 `D:\develop\.tmp\verify-removed.js`：真 Chrome 加载页面，
+用 `Fetch.fulfillRequest` 把 `push2*.eastmoney.com` 全部回放成
+`fixtures/` 里的真实抓包，断言面板已消失、脚本清单正确、
+两张图都有实际像素、无 JS 报错。当前 **9/9 通过**。
+
+两个容易踩的点：
+- 回放 JSONP 必须把响应包成 `cb(payload)`，只返回裸 JSON 会让页面
+  `Uncaught SyntaxError`，看起来像页面坏了
+- `fixtures/` 里**没有** `trends`（分时）快照，而页面初始加载的正是分时图。
+  验证时要先等队列排空、再切到日K，且**只能点一次**——
+  反复点会 abort 掉正在进行的请求，永远加载不完（本次因此误判过一轮）
+
+---
+
+## 10. 一句总结
 
 项目本身干净、结构清晰，问题集中在**数据边界情况**与**CSS 层叠顺序**，而不是架构。
 两次接手修掉的 bug 都属于「平时看起来正常、特定时段或特定面板才露馅」的类型：
