@@ -433,7 +433,9 @@
     );
     return fetchUsdCny().then((fx) =>
       Promise.all([
-        fetchQuotes(secids.concat([GOLD_SECID, SHANGHAI_GOLD_SECID, "1.000688"])),
+        fetchQuotes(
+          secids.concat([GOLD_SECID, SHANGHAI_GOLD_SECID, "1.000688", "0.399673"])
+        ),
         shanghaiQuote,
       ]).then(([quotes, shanghaiStock]) => {
           const regions = REGIONS.map((region) => ({
@@ -447,6 +449,7 @@
 
           const goldRow = quotes.get("GC00Y");
           const starRow = quotes.get("000688");
+          const cybRow = quotes.get("399673");
 
           let gold = null;
           if (goldRow) {
@@ -513,19 +516,21 @@
             shanghaiGold.premium = round(premium, 2);
             shanghaiGold.premium_pct = round((premium / shanghaiGold.price) * 100, 2);
           }
-          let star50 = null;
-          if (starRow) {
-            star50 = {
-              price: round(scaled(starRow.f2), 3),
-              change: round(scaled(starRow.f4), 3),
-              pct: scaled(starRow.f3),
-              previous: round(scaled(starRow.f18), 3),
-              open: round(scaled(starRow.f17), 3),
-              high: round(scaled(starRow.f15), 3),
-              low: round(scaled(starRow.f16), 3),
-              updated: "",
-            };
-          }
+          const indexAsset = (row) =>
+            row
+              ? {
+                  price: round(scaled(row.f2), 3),
+                  change: round(scaled(row.f4), 3),
+                  pct: scaled(row.f3),
+                  previous: round(scaled(row.f18), 3),
+                  open: round(scaled(row.f17), 3),
+                  high: round(scaled(row.f15), 3),
+                  low: round(scaled(row.f16), 3),
+                  updated: "",
+                }
+              : null;
+          const star50 = indexAsset(starRow);
+          const cyb50 = indexAsset(cybRow);
 
           return {
             ok: true,
@@ -533,7 +538,7 @@
             as_of: new Date().toISOString(),
             source: "东方财富公开行情",
             regions,
-            assets: { gold, shanghai_gold: shanghaiGold, star50 },
+            assets: { gold, shanghai_gold: shanghaiGold, star50, cyb50 },
           };
         }
       )
@@ -722,12 +727,22 @@
     return chart;
   }
 
-  function buildStarChart(period) {
+  /* Index panels that share one shape: intraday line + candles.
+   * Keeping them in a table means a new index needs no new code path. */
+  const INDEX_CHARTS = {
+    star50: { secid: "1.000688", symbol: "star50", name: "科创50" },
+    cyb50: { secid: "0.399673", symbol: "cyb50", name: "创业50" },
+  };
+
+  function buildIndexChart(symbol, period) {
+    const meta = INDEX_CHARTS[symbol];
+    if (!meta) return Promise.reject(new Error(`未知品种 ${symbol}`));
     if (period === "intraday") {
-      return fetchTrends("1.000688", 2).then((series) => ({
+      return fetchTrends(meta.secid, 2).then((series) => ({
         ok: true,
         stale: false,
-        symbol: "star50",
+        symbol,
+        name: meta.name,
         period,
         precision: 2,
         source: "东方财富",
@@ -736,10 +751,11 @@
         points: series.points,
       }));
     }
-    return fetchCandles("1.000688", period).then((points) => ({
+    return fetchCandles(meta.secid, period).then((points) => ({
       ok: true,
       stale: false,
-      symbol: "star50",
+      symbol,
+      name: meta.name,
       period,
       precision: 2,
       source: "东方财富",
@@ -752,7 +768,7 @@
     const key = `chart:${symbol}:${period}`;
     const ttl = period === "intraday" ? 30000 : 120000;
     return cached(key, ttl, () =>
-      symbol === "gold" ? buildGoldChart(period) : buildStarChart(period)
+      symbol === "gold" ? buildGoldChart(period) : buildIndexChart(symbol, period)
     );
   }
 

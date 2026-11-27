@@ -27,6 +27,14 @@
         lastLoadedAt: 0,
         stale: false,
       },
+      cyb50: {
+        period: "intraday",
+        dataPeriod: null,
+        controller: null,
+        loading: false,
+        lastLoadedAt: 0,
+        stale: false,
+      },
     },
     lastWarning: "",
     toastTimer: 0,
@@ -431,15 +439,19 @@
       updateAsset("gold", payload.assets.gold);
       updateShanghaiGold(payload.assets.shanghai_gold);
       updateAsset("star50", payload.assets.star50);
+      updateAsset("cyb50", payload.assets.cyb50);
       if (charts.gold && payload.assets.gold) {
         charts.gold.syncLatestPrice(Number(payload.assets.gold.price));
       }
       if (charts.gold && payload.assets.shanghai_gold) {
         charts.gold.syncShanghaiPrice(Number(payload.assets.shanghai_gold.price));
       }
-      if (charts.star50 && payload.assets.star50) {
-        charts.star50.syncLatestPrice(Number(payload.assets.star50.price));
-      }
+      ["star50", "cyb50"].forEach((key) => {
+        const asset = payload.assets[key];
+        if (charts[key] && asset && Number.isFinite(Number(asset.price))) {
+          charts[key].syncLatestPrice(Number(asset.price));
+        }
+      });
     }
     if (payload.stale) {
       setConnection("stale", payload.warning);
@@ -762,6 +774,7 @@
         loadDashboard(true, false);
         loadChart("gold", state.charts.gold.period, { force: true, silent: true });
         loadChart("star50", state.charts.star50.period, { force: true, silent: true });
+        loadChart("cyb50", state.charts.cyb50.period, { force: true, silent: true });
       });
     }
 
@@ -789,6 +802,10 @@
       symbol: "star50",
       accent: "#65aaff",
     });
+    charts.cyb50 = new MarketChart($("cyb50-chart"), $("cyb50-tooltip"), {
+      symbol: "cyb50",
+      accent: "#7bd2a4",
+    });
   }
 
   function startTimers() {
@@ -798,6 +815,7 @@
       const active = [
         ["gold", state.charts.gold.period],
         ["star50", state.charts.star50.period],
+        ["cyb50", state.charts.cyb50.period],
       ];
       active.forEach(([symbol, period]) => {
         if (period === "intraday") {
@@ -813,7 +831,7 @@
     document.addEventListener("visibilitychange", () => {
       if (!document.hidden) {
         loadDashboard(false, true);
-        ["gold", "star50"].forEach((symbol) => {
+        ["gold", "star50", "cyb50"].forEach((symbol) => {
           if (state.charts[symbol].period === "intraday") {
             loadChart(symbol, "intraday", { silent: true, keepView: true });
           }
@@ -841,6 +859,7 @@
       await loadDashboard(false, false);
       await loadChart("gold", "intraday", { silent: false });
       await loadChart("star50", "intraday", { silent: false });
+      await loadChart("cyb50", "intraday", { silent: false });
     })();
     startTimers();
   }

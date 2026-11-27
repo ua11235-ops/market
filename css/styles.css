@@ -14,6 +14,8 @@
   --gold-deep: #a77830;
   --blue: #65aaff;
   --blue-bright: #9ecbff;
+  --green: #7bd2a4;
+  --green-bright: #aeecc8;
   --up: #ff5c6c;
   --down: #0fc48c;
   --flat: #8a96a6;
@@ -692,6 +694,16 @@ a {
   --panel-aura: rgba(70, 137, 220, 0.055);
 }
 
+#cyb50-panel {
+  --panel-aura: rgba(123, 210, 164, 0.05);
+}
+
+/* Gold carries the double series plus the premium note, so it reads better
+ * full-width; the two index panels then pair up underneath. */
+#gold-panel {
+  grid-column: 1 / -1;
+}
+
 .panel-accent {
   position: absolute;
   top: 0;
@@ -707,6 +719,10 @@ a {
 
 .panel-accent--blue {
   background: linear-gradient(90deg, transparent, rgba(101, 170, 255, 0.65), transparent);
+}
+
+.panel-accent--green {
+  background: linear-gradient(90deg, transparent, rgba(123, 210, 164, 0.62), transparent);
 }
 
 .asset-header {
@@ -758,6 +774,15 @@ a {
 
 .asset-icon--blue svg {
   stroke: var(--blue);
+}
+
+.asset-icon--green {
+  border-color: rgba(123, 210, 164, 0.22);
+  background: rgba(123, 210, 164, 0.06);
+}
+
+.asset-icon--green svg {
+  stroke: var(--green);
 }
 
 .asset-title-row {
@@ -1046,6 +1071,11 @@ a {
   color: var(--blue-bright);
 }
 
+#cyb50-panel .timeframe-group button.is-active {
+  background: rgba(123, 210, 164, 0.13);
+  color: var(--green-bright);
+}
+
 .chart-legend {
   display: flex;
   align-items: center;
@@ -1173,6 +1203,10 @@ a {
 
 #star50-panel .chart-tooltip {
   border-color: rgba(101, 170, 255, 0.24);
+}
+
+#cyb50-panel .chart-tooltip {
+  border-color: rgba(123, 210, 164, 0.24);
 }
 
 .tooltip-head {
@@ -1305,6 +1339,10 @@ a {
   border-top-color: var(--blue);
 }
 
+#cyb50-panel .spinner {
+  border-top-color: var(--green);
+}
+
 .chart-empty {
   position: absolute;
   z-index: 3;
@@ -1352,6 +1390,10 @@ a {
 
 .source-badge--blue i {
   background: var(--blue);
+}
+
+.source-badge--green i {
+  background: var(--green);
 }
 
 .footer-divider {

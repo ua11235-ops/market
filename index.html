@@ -7,7 +7,7 @@
   <meta name="theme-color" content="#05080c">
   <title>金市 · 全球行情</title>
   <link rel="icon" href="favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="css/styles.css?v=18">
+  <link rel="stylesheet" href="css/styles.css?v=19">
 </head>
 <body>
   <div class="page-glow page-glow--gold" aria-hidden="true"></div>
@@ -232,6 +232,69 @@
           <span class="footer-note">滚轮缩放 · 拖动平移 · 双击复位</span>
         </footer>
       </article>
+
+      <article class="chart-panel" id="cyb50-panel" data-symbol="cyb50">
+        <div class="panel-accent panel-accent--green" aria-hidden="true"></div>
+        <header class="asset-header">
+          <div class="asset-identity">
+            <span class="asset-icon asset-icon--green" aria-hidden="true">
+              <svg viewBox="0 0 32 32">
+                <path d="m16 4 10 6v12l-10 6-10-6V10l10-6Z" />
+                <path d="M16 10.5v11M12.4 12.5h5.4a2.4 2.4 0 0 1 0 4.8h-3.6a2.4 2.4 0 0 0 0 4.8h5.4" class="dim" />
+              </svg>
+            </span>
+            <div>
+              <div class="asset-title-row">
+                <h2>创业50</h2>
+                <span class="asset-code">399673 / SZ</span>
+                <span class="data-badge" id="cyb50-state">实时</span>
+              </div>
+              <p>创业板50成份指数 · 人民币</p>
+            </div>
+          </div>
+          <div class="asset-price-block">
+            <div class="asset-price" id="cyb50-price">—</div>
+            <div class="asset-change" id="cyb50-change">等待行情</div>
+          </div>
+        </header>
+
+        <div class="quote-strip" id="cyb50-stats">
+          <div><span>昨收</span><strong data-field="previous">—</strong></div>
+          <div><span>今开</span><strong data-field="open">—</strong></div>
+          <div><span>最高</span><strong data-field="high">—</strong></div>
+          <div><span>最低</span><strong data-field="low">—</strong></div>
+        </div>
+
+        <div class="chart-toolbar">
+          <div class="timeframe-group" role="group" aria-label="创业50周期">
+            <button type="button" data-symbol="cyb50" data-period="intraday" class="is-active">分时</button>
+            <button type="button" data-symbol="cyb50" data-period="day">日K</button>
+            <button type="button" data-symbol="cyb50" data-period="week">周K</button>
+            <button type="button" data-symbol="cyb50" data-period="month">月K</button>
+          </div>
+          <div class="chart-legend" id="cyb50-legend">
+            <span class="legend-item legend-avg"><i></i>均价</span>
+          </div>
+        </div>
+
+        <div class="chart-wrap" id="cyb50-chart-wrap">
+          <canvas id="cyb50-chart" role="img" aria-label="创业50价格走势图"></canvas>
+          <div class="chart-zoom-badge" id="cyb50-zoom-badge"></div>
+          <div class="chart-tooltip" id="cyb50-tooltip" role="status"></div>
+          <div class="chart-loading" id="cyb50-loading">
+            <span class="spinner"></span><span>正在载入走势</span>
+          </div>
+          <div class="chart-empty" id="cyb50-empty" hidden>暂无可用走势数据</div>
+        </div>
+
+        <footer class="panel-footer">
+          <span class="source-badge source-badge--green"><i></i><span id="cyb50-source">东方财富</span></span>
+          <span class="footer-divider"></span>
+          <span id="cyb50-updated">数据载入中</span>
+          <span class="footer-spacer"></span>
+          <span class="footer-note">滚轮缩放 · 拖动平移 · 双击复位</span>
+        </footer>
+      </article>
     </section>
 
     <footer class="page-footer">
@@ -243,8 +306,8 @@
 
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
-  <script src="js/data.js?v=18"></script>
-  <script src="js/chart.js?v=18"></script>
-  <script src="js/app.js?v=18"></script>
+  <script src="js/data.js?v=19"></script>
+  <script src="js/chart.js?v=19"></script>
+  <script src="js/app.js?v=19"></script>
 </body>
 </html>

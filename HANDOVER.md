@@ -434,7 +434,68 @@ HANDOVER 第 5 节早就写了这条，但这次仍然踩了。**结论：改仓
 
 ---
 
-## 10. 一句总结
+## 10. 第五次接手（2026-11-27）：新增「创业50」面板
+
+### 10.1 加了什么
+
+新增 **创业 50**（创业板 50 成份指数，`399673`，深交所 → 东财 secid `0.399673`）
+面板，形态与科创 50 完全一致：分时 / 日 K / 周 K / 月 K，含 MA 与成交量。
+主题色用绿色（`--green: #7bd2a4`），与黄金的金、科创的蓝区分开。
+
+### 10.2 顺手做的一次小重构
+
+原来 `buildStarChart()` 把 `1.000688` 和 `"star50"` 硬编码在里面，
+加第二个指数就只能复制粘贴。这次改成一张表：
+
+```js
+const INDEX_CHARTS = {
+  star50: { secid: "1.000688", symbol: "star50", name: "科创50" },
+  cyb50:  { secid: "0.399673", symbol: "cyb50",  name: "创业50" },
+};
+function buildIndexChart(symbol, period) { ... }
+```
+
+`getChart()` 现在走 `buildIndexChart(symbol, period)`。
+`buildDashboard()` 里的 `star50` 资产块也抽成了 `indexAsset(row)`，
+批量报价列表加了 `0.399673`。
+
+**以后再加同类指数，不用新增代码路径**：`INDEX_CHARTS` 加一条、
+批量报价与 `assets` 挂一行、页面照抄 `#star50-panel` 改 id、
+`app.js` 里登记 state / chart 实例 / 刷新列表，即可。
+
+### 10.3 布局调整
+
+三个面板在两列栅格里会剩一个占第三行、右侧空一块。所以给
+`#gold-panel` 加了 `grid-column: 1 / -1`：黄金占满整行（它本来就是
+双序列 + 价差备注，信息密度最高），科创 50 与创业 50 并排在下面。
+窄屏下 `.charts-section` 本来就是单列，不受影响。
+
+### 10.4 关于「少测几次」
+
+用户特别要求：东财对匿名高频请求会封 IP，测试不要反复打真实接口。
+所以这次**全程没有请求东财**，验证方式是：
+
+1. 用已有的 `kline-star-day.json` 改造成 `kline-cyb50-day.json`
+   （数值整体 ×1.8，一眼能看出渲染的是哪份数据）；
+2. 往 `ulist-all.json` 里补一条 `399673`（同样 ×1.8）；
+3. `verify-cyb50.js` 用 `Fetch.fulfillRequest` 把这些 fixture 当作
+   JSONP 回放给页面，断言面板存在、卡片有价、图表有实际像素、无 JS 报错。
+
+当前 **11/11 通过**。这套流程不依赖网络，可以随时重跑：
+
+```powershell
+$node = "C:\Users\admin\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\node\bin\node.exe"
+// 先起本地静态服务（仓库根目录，8899 端口），然后：
+& $node 'D:\develop\.tmp\verify-cyb50.js'
+```
+
+### 10.5 `?v=` 递增到 19
+
+`index.html` 仍是 4 处版本号，本次 18 → **19**。
+
+---
+
+## 11. 一句总结
 
 项目本身干净、结构清晰，问题集中在**数据边界情况**与**CSS 层叠顺序**，而不是架构。
 两次接手修掉的 bug 都属于「平时看起来正常、特定时段或特定面板才露馅」的类型：
